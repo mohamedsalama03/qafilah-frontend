@@ -29,7 +29,7 @@ pnpm audit
 pnpm peers check
 ```
 
-`verify` performs non-mutating format, lint, typecheck and tests, then a normal production build. `pnpm format` is the separate formatter. `pnpm test` terminates; `test:watch` is optional. Playwright starts/reuses the local development server on 3001 and starts its own production server on 3411; production tests never reuse an unrelated service. `pnpm start` packages the generated static assets and starts Next’s standalone server, also on 3411 by default. Real Laravel journeys are **not** included or certified.
+`verify` performs non-mutating format, lint, typecheck and tests, then a normal production build. `pnpm format` is the separate formatter. `pnpm test` terminates; `test:watch` is optional. Playwright owns a development server on 3425 and a production server on 3411, with reuse disabled so an unrelated service cannot supply evidence. Interactive `pnpm dev` remains on 3001. `pnpm start` packages the generated static assets and starts Next’s standalone server, also on 3411 by default. Real Laravel journeys are **not** included or certified.
 
 An optional `pnpm analyze` opens Next.js’s local bundle analyzer. It is not needed to serve the app and adds no analyzer runtime dependency. No external CI service is assumed.
 
@@ -56,4 +56,4 @@ The multi-stage image installs from the lockfile, builds standalone output and r
 
 Every development route returns 404 in production; examples are excluded from production bundles. See [architecture](docs/architecture.md), [backend contract inventory](docs/backend-contracts.md), [design system](DESIGN.md), and [F1 implementation and verification report](docs/F1-report.md).
 
-Git was absent at inspection. **GIT INITIALIZATION REQUIRED** before a versioned handoff; initialization was not authorized. No commit or push was attempted. F2 has not started.
+Git was absent at initial inspection. Product Authority subsequently authorized initialization and publication of the unchanged F1 baseline, `ed71b2b0ee6db46cb5e358b079715e5c419170b0`. Focused remediation is one local child commit of that baseline and must not be pushed. See the [focused remediation report](docs/F1-remediation-report.md) for finding traceability and current verification; the original F1 report is historical evidence. F2 has not started.

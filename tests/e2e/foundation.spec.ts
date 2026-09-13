@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const browserErrors = new WeakMap<Page, string[]>();
@@ -38,18 +38,16 @@ test.afterEach(async ({ page }) => {
 
 async function expectNoDocumentOverflow(page: Page) {
   const dimensions = await page.evaluate(() => ({
-    viewport: window.innerWidth,
+    viewport: document.documentElement.clientWidth,
     document: document.documentElement.scrollWidth,
     body: document.body.scrollWidth,
   }));
-  expect(dimensions.document, JSON.stringify(dimensions)).toBeLessThanOrEqual(
-    dimensions.viewport + 1,
-  );
-  expect(dimensions.body, JSON.stringify(dimensions)).toBeLessThanOrEqual(dimensions.viewport + 1);
+  expect(dimensions.document, JSON.stringify(dimensions)).toBeLessThanOrEqual(dimensions.viewport);
+  expect(dimensions.body, JSON.stringify(dimensions)).toBeLessThanOrEqual(dimensions.viewport);
 }
 
 async function screenshot(page: Page, name: string, fullPage = true) {
-  const directory = path.resolve("artifacts/screenshots");
+  const directory = path.resolve("artifacts/remediation/screenshots", test.info().project.name);
   await mkdir(directory, { recursive: true });
   await page.evaluate(async () => {
     await document.fonts.ready;
@@ -61,6 +59,194 @@ async function screenshot(page: Page, name: string, fullPage = true) {
     animations: "disabled",
   });
 }
+
+async function saveEvidence(name: string, value: unknown) {
+  const directory = path.resolve("artifacts/remediation");
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    path.join(directory, `${name}-${test.info().project.name}.json`),
+    `${JSON.stringify(value, null, 2)}\n`,
+  );
+}
+
+const longToken = "Q".repeat(144);
+
+// Alter only text content in the real rendered primitives, never their classes,
+// widths or wrapping. This exercises extreme backend text without adding a route,
+// production fixture, fabricated Store, or assumed API contract.
+for (const width of [1440, 1280, 1024, 768, 390]) {
+  test(`long tokens stay within the document at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/design-system/detail");
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await expect(page.getByRole("dialog", { name: "Navigation", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Navigation", exact: true })).toBeHidden();
+    await page.setViewportSize({ width, height: width < 768 ? 844 : 900 });
+    const heading = page.getByRole("heading", { level: 1 });
+    await expect(heading).toHaveText("Everyday canvas tote");
+    await heading.evaluate((element, text) => {
+      element.textContent = text;
+    }, longToken);
+    await page.locator("main dd").evaluateAll((elements, text) => {
+      elements.forEach((element) => {
+        element.textContent = text;
+      });
+    }, longToken);
+    await page.getByRole("heading", { level: 3 }).evaluate((element, text) => {
+      element.textContent = text;
+    }, longToken);
+    await page
+      .locator('[aria-current="page"]')
+      .last()
+      .evaluate((element, text) => {
+        element.textContent = text;
+      }, longToken);
+    await page.getByText("No store connected", { exact: true }).evaluate((element, text) => {
+      element.textContent = text;
+    }, longToken);
+    await expect(heading).toHaveText(longToken);
+    await expect(heading).toHaveCSS("overflow-wrap", "anywhere");
+    await expect(heading).toHaveCSS("text-overflow", "clip");
+    await expect(heading).toHaveCSS("word-break", "normal");
+    await expectNoDocumentOverflow(page);
+    await screenshot(page, `long-detail-store-${width}`);
+
+    await page.goto("/design-system/form");
+    await page.getByRole("button", { name: "Validate preview" }).click();
+    const field = page.getByRole("textbox", { name: "Name", exact: true });
+    await expect(field).toHaveAttribute("aria-invalid", "true");
+    const errorId = await field.getAttribute("aria-describedby");
+    expect(errorId).toBeTruthy();
+    await page.locator(`[id="${errorId}"]`).evaluate((element, text) => {
+      element.textContent = text;
+    }, longToken);
+    await expect(field).toHaveAccessibleDescription(longToken);
+    await expectNoDocumentOverflow(page);
+    await screenshot(page, `long-validation-${width}`);
+
+    await page.goto("/design-system/table");
+    if (width < 768) {
+      await page.getByRole("button", { name: "Actions for EX-001", exact: true }).click();
+      await expect(page.getByRole("menuitem", { name: "View detail pattern" })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("menu")).toBeHidden();
+      await page
+        .getByRole("list", { name: "Sample records summaries" })
+        .getByText("Everyday canvas tote", { exact: true })
+        .evaluate((element, text) => {
+          element.textContent = text;
+        }, longToken);
+      await expectNoDocumentOverflow(page);
+      await screenshot(page, `long-resource-${width}`);
+      await page.getByLabel("Preview state", { exact: true }).selectOption("loading");
+    }
+    const scrollRegion = page.getByRole("region", {
+      name: "Sample records, scroll horizontally for more columns",
+      exact: true,
+    });
+    await expect(scrollRegion).toHaveCSS("overflow-x", "auto");
+    await expectNoDocumentOverflow(page);
+    if (width < 768) {
+      const containment = await scrollRegion.evaluate((element) => ({
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+      }));
+      expect(containment.scrollWidth).toBeGreaterThan(containment.clientWidth);
+    }
+  });
+}
+
+test("ActionMenu keyboard focus has a contrasting outline on normal and destructive items", async ({
+  page,
+}) => {
+  await page.goto("/design-system/components");
+  const trigger = page.getByRole("button", { name: "Example resource actions", exact: true });
+  for (let presses = 0; presses < 40; presses += 1) {
+    if (await trigger.evaluate((element) => element === document.activeElement)) break;
+    await page.keyboard.press("Tab");
+  }
+  await expect(trigger).toBeFocused();
+  await page.keyboard.press("Enter");
+  const measurements = [];
+  for (const [index, label] of ["Inspect example", "Clear example action"].entries()) {
+    if (index > 0) await page.keyboard.press("ArrowDown");
+    const item = page.getByRole("menuitem", { name: label, exact: true });
+    await expect(item).toBeFocused();
+    await expect(item).toHaveCSS("outline-style", "solid");
+    await expect(item).toHaveCSS("outline-width", "2px");
+    const measurement = await item.evaluate((element) => {
+      const styles = getComputedStyle(element);
+      const menuStyles = getComputedStyle(element.closest('[role="menu"]')!);
+      const luminance = (color: string) => {
+        const channels = color
+          .match(/[\d.]+/g)!
+          .slice(0, 3)
+          .map(Number)
+          .map((channel) => {
+            const srgb = channel / 255;
+            return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+          });
+        return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+      };
+      const contrast = (color: string, adjacent: string) => {
+        const first = luminance(color);
+        const second = luminance(adjacent);
+        return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+      };
+      return {
+        label: element.textContent,
+        focusVisible: element.matches(":focus-visible"),
+        outline: styles.outlineColor,
+        outlineOffset: styles.outlineOffset,
+        foreground: styles.color,
+        itemBackground: styles.backgroundColor,
+        menuBackground: menuStyles.backgroundColor,
+        itemContrast: contrast(styles.outlineColor, styles.backgroundColor),
+        menuContrast: contrast(styles.outlineColor, menuStyles.backgroundColor),
+      };
+    });
+    expect(measurement.focusVisible).toBe(true);
+    expect(measurement.itemContrast).toBeGreaterThanOrEqual(3);
+    expect(measurement.menuContrast).toBeGreaterThanOrEqual(3);
+    measurements.push(measurement);
+    await screenshot(page, `menu-focus-${index}`, false);
+  }
+  await page.keyboard.press("Escape");
+  await expect(trigger).toBeFocused();
+  await saveEvidence("menu-focus-contrast", measurements);
+});
+
+test("rendered control and drawer geometry remains accurately measurable", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/design-system/form");
+  const radius = (element: HTMLElement | SVGElement) => getComputedStyle(element).borderRadius;
+  const geometry = {
+    buttonRadius: await page.getByRole("button", { name: "Validate preview" }).evaluate(radius),
+    inputRadius: await page.getByRole("textbox", { name: "Name", exact: true }).evaluate(radius),
+    cardRadius: await page.locator("main section").first().evaluate(radius),
+    triggerHeight: await page
+      .getByRole("button", { name: "Open navigation" })
+      .evaluate((element) => element.getBoundingClientRect().height),
+    closeHeight: 0,
+    navHeight: 0,
+  };
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  const drawer = page.getByRole("dialog", { name: "Navigation", exact: true });
+  geometry.closeHeight = await drawer
+    .getByRole("button", { name: "Close navigation" })
+    .evaluate((element) => element.getBoundingClientRect().height);
+  geometry.navHeight = await drawer
+    .getByRole("link", { name: "Form pattern", exact: true })
+    .evaluate((element) => element.getBoundingClientRect().height);
+  await saveEvidence("rendered-geometry", geometry);
+  expect(geometry.triggerHeight).toBe(44);
+  expect(geometry.closeHeight).toBe(44);
+  expect(geometry.navHeight).toBe(40);
+  expect(geometry.buttonRadius).toBe("8px");
+  expect(geometry.inputRadius).toBe("8px");
+  expect(geometry.cardRadius).toBe("10px");
+});
 
 for (const width of [1440, 1280, 1024, 768, 390]) {
   test(`review surfaces remain readable at ${width}px`, async ({ page }) => {
@@ -164,6 +350,12 @@ test("table pagination is URL-addressable and follows browser history", async ({
   await expect(page.getByRole("button", { name: "Next", exact: true })).toBeDisabled();
   await page.reload();
   await expect(table.getByText("EX-009", { exact: true })).toBeVisible();
+  // SSR content alone is not hydration evidence. Opening and closing the real
+  // client menu proves interactivity without changing the pagination history.
+  await page.getByRole("button", { name: "Actions for EX-009", exact: true }).click();
+  await expect(page.getByRole("menuitem", { name: "View detail pattern" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toBeHidden();
   await page.goBack();
   await expect(table.getByText("EX-001", { exact: true })).toBeVisible();
   await page.goForward();

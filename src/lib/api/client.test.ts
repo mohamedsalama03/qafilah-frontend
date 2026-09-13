@@ -80,6 +80,23 @@ describe("credentialed transport boundary", () => {
     expect(new Headers(options?.headers).get("X-Test-CSRF")).toBe("test-csrf-value");
     expect(options?.body).toBe('{"label":"Example"}');
   });
+  it.each<HttpMethod>(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])(
+    "never emits Authorization or Bearer credentials for configured %s requests",
+    async (method) => {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+      const api = createApiClient({ apiOrigin: origin, fetch: fetcher, csrf });
+      await api.request(endpoint(method), undefined);
+      const headers = new Headers(fetcher.mock.calls[0]?.[1]?.headers);
+      expect(headers.has("Authorization")).toBe(false);
+      for (const [name, value] of headers) {
+        expect(name.toLowerCase()).not.toBe("authorization");
+        expect(value).not.toMatch(/^Bearer\s/i);
+      }
+      if (!["GET", "HEAD"].includes(method))
+        expect(headers.get(csrf.headerName)).toBe("test-csrf-value");
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
   it.each(["Authorization", "Cookie", "X-Forwarded-Host", "Origin", "Bad\r\nHeader"])(
     "rejects unsafe CSRF header %s",
     (headerName) => {

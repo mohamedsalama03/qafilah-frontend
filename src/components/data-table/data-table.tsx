@@ -107,7 +107,7 @@ export function DataTable<TData extends RowData>({
             aria-label={`${caption}, scroll horizontally for more columns`}
             tabIndex={0}
             className={cn(
-              "overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus",
+              "relative overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus",
               mobileRow && hasRows && "hidden md:block",
             )}
           >
@@ -247,7 +247,7 @@ export function DataTable<TData extends RowData>({
                     key={getRowId(row)}
                     className="flex items-start justify-between gap-3 px-4 py-4"
                   >
-                    <div className="min-w-0 flex-1">{mobileRow(row)}</div>
+                    <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">{mobileRow(row)}</div>
                     {rowActions && <div className="shrink-0">{rowActions(row)}</div>}
                   </li>
                 ))}

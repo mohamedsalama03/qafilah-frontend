@@ -14,7 +14,14 @@ export type AuthState =
       readonly status: "unauthenticated";
       readonly reason: "signed-out" | "expired" | "not-signed-in";
     }
-  | { readonly status: "authenticated"; readonly principal: AuthPrincipal }
+  | {
+      readonly status: "authenticated";
+      readonly principal: AuthPrincipal;
+      readonly revalidation?:
+        { readonly status: "pending" } | { readonly status: "error"; readonly error: ApiError };
+    }
+  | { readonly status: "logging-out" }
+  | { readonly status: "logout-failed"; readonly error: ApiError }
   | { readonly status: "error"; readonly error: ApiError };
 
 export interface AuthAdapter {
@@ -37,6 +44,8 @@ export function createAuthController(options: AuthControllerOptions = {}) {
   let requestController: AbortController | null = null;
   let pendingBootstrap: Promise<void> | null = null;
   let pendingLogout: Promise<void> | null = null;
+  // This intent is deliberately memory-only. A new document must verify remote identity afresh.
+  let logoutRequested = false;
   const listeners = new Set<() => void>();
 
   function update(next: AuthState): void {
@@ -67,11 +76,21 @@ export function createAuthController(options: AuthControllerOptions = {}) {
         return Promise.resolve();
       }
       if (pendingLogout) return pendingLogout;
+      if (logoutRequested) return Promise.resolve();
       if (pendingBootstrap) return pendingBootstrap;
-      const ticket = revoke();
+      const previous = state.status === "authenticated" ? state : undefined;
+      const ticket = ++generation;
       const controller = new AbortController();
       requestController = controller;
-      update({ status: "bootstrapping" });
+      update(
+        previous
+          ? {
+              status: "authenticated",
+              principal: previous.principal,
+              revalidation: { status: "pending" },
+            }
+          : { status: "bootstrapping" },
+      );
       const adapter = options.adapter;
       const task = (async () => {
         try {
@@ -88,14 +107,34 @@ export function createAuthController(options: AuthControllerOptions = {}) {
               throw new ApiError("invalid-response");
             }
           }
+          if (!principalId || (previous && principalId !== previous.principal.principalId))
+            revoke();
           update(
             principalId
-              ? { status: "authenticated", principal: Object.freeze({ principalId }) }
+              ? {
+                  status: "authenticated",
+                  principal:
+                    previous?.principal.principalId === principalId
+                      ? previous.principal
+                      : Object.freeze({ principalId }),
+                }
               : { status: "unauthenticated", reason: "not-signed-in" },
           );
         } catch (error) {
           if (ticket !== generation) return;
           const normalized = normalizeUnexpectedError(error);
+          if (
+            previous &&
+            ["network", "server", "timeout", "rate-limited"].includes(normalized.kind)
+          ) {
+            update({
+              status: "authenticated",
+              principal: previous.principal,
+              revalidation: { status: "error", error: normalized },
+            });
+            return;
+          }
+          revoke();
           if (["unauthenticated", "session-expired"].includes(normalized.kind))
             update({ status: "unauthenticated", reason: "expired" });
           else update({ status: "error", error: normalized });
@@ -111,6 +150,7 @@ export function createAuthController(options: AuthControllerOptions = {}) {
     },
     logout(): Promise<void> {
       if (pendingLogout) return pendingLogout;
+      logoutRequested = true;
       const ticket = revoke();
       if (!options.adapter) {
         update({ status: "unavailable" });
@@ -118,7 +158,7 @@ export function createAuthController(options: AuthControllerOptions = {}) {
       }
       const controller = new AbortController();
       requestController = controller;
-      update({ status: "bootstrapping" });
+      update({ status: "logging-out" });
       const adapter = options.adapter;
       const task = (async () => {
         try {
@@ -129,7 +169,7 @@ export function createAuthController(options: AuthControllerOptions = {}) {
           if (ticket === generation) update({ status: "unauthenticated", reason: "signed-out" });
         } catch (error) {
           if (ticket === generation)
-            update({ status: "error", error: normalizeUnexpectedError(error) });
+            update({ status: "logout-failed", error: normalizeUnexpectedError(error) });
         } finally {
           if (ticket === generation) requestController = null;
           pendingLogout = null;
@@ -140,6 +180,8 @@ export function createAuthController(options: AuthControllerOptions = {}) {
     },
     handleApiError(error: ApiError): void {
       if (!["unauthenticated", "session-expired", "forbidden"].includes(error.kind)) return;
+      // A stale request must not replace the explicit, unconfirmed logout state.
+      if (logoutRequested) return;
       revoke();
       // Permissions are never retained after a 403. A verified adapter must refresh authority.
       update(
@@ -148,12 +190,11 @@ export function createAuthController(options: AuthControllerOptions = {}) {
           : { status: "unauthenticated", reason: "expired" },
       );
     },
-    /** Hide private UI during page suspension without claiming that the server signed out. */
+    /** Pagehide/external invalidation only: ordinary tab visibility is not authority loss. */
     suspend(): void {
-      // Hiding a tab must not abort an in-progress server logout.
-      if (pendingLogout) {
+      // Page suspension must not abort remote logout or erase its unconfirmed result.
+      if (logoutRequested) {
         options.onAuthorityLost?.();
-        update({ status: "bootstrapping" });
         return;
       }
       revoke();

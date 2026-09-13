@@ -9,6 +9,7 @@ import { createQueryClient } from "@/lib/query/client";
 import { createScopeController } from "@/lib/query/scope";
 import { ConnectionUnavailable } from "./connection-unavailable";
 import { ErrorState } from "@/components/ui/error-state";
+import { Button } from "@/components/ui/button";
 import type { ApiError } from "@/lib/api/errors";
 
 function createSession(adapter?: AuthAdapter) {
@@ -77,7 +78,6 @@ export function SessionBoundary({
       session.auth.suspend();
     };
     const recheck = () => {
-      hide();
       void session.auth.bootstrap();
     };
     // React StrictMode cancels its first effect setup before this starts any request.
@@ -89,14 +89,14 @@ export function SessionBoundary({
     };
     const onVisibility = () => {
       if (document.visibilityState === "visible") recheck();
-      else suspend();
     };
     const onFocus = () => {
       if (document.visibilityState === "visible") recheck();
     };
     const events = createSessionEvents(() => {
+      // A cross-tab authority invalidation is distinct from a routine visibility change.
+      suspend();
       if (document.visibilityState === "visible") recheck();
-      else suspend();
     });
     session.setInvalidationPublisher(events.invalidate);
     window.addEventListener("pagehide", suspend);
@@ -120,6 +120,19 @@ export function SessionBoundary({
   }, [state.status, router]);
 
   if (state.status === "unavailable") return <ConnectionUnavailable />;
+  if (state.status === "logout-failed")
+    return (
+      <main className="mx-auto max-w-xl px-6 py-24">
+        <ErrorState
+          title="Sign-out could not be confirmed"
+          description="This dashboard has been cleared locally, but the server may still have an active session. Retry sign-out before leaving a shared device."
+          requestId={state.error.requestId}
+        />
+        <Button className="mx-5" variant="primary" onClick={() => void session.auth.logout()}>
+          Retry sign out
+        </Button>
+      </main>
+    );
   if (state.status === "error")
     return (
       <main className="mx-auto max-w-xl px-6 py-24">
@@ -141,14 +154,31 @@ export function SessionBoundary({
     return (
       <main aria-busy="true" className="mx-auto max-w-md px-6 py-24">
         <p role="status" className="text-text-muted">
-          Checking your session…
+          {state.status === "logging-out"
+            ? "Signing out…"
+            : state.status === "unauthenticated"
+              ? "Returning to sign in…"
+              : "Checking your session…"}
         </p>
       </main>
     );
   return (
     <SessionContext.Provider value={session}>
       <QueryClientProvider client={session.queryClient}>
-        <div ref={privateContent}>{children}</div>
+        <div ref={privateContent} key={state.principal.principalId}>
+          {state.revalidation?.status === "error" && (
+            <div
+              role="status"
+              className="border-b border-border bg-surface-subtle px-5 py-3 text-sm"
+            >
+              <p>Your session couldn’t be rechecked. Your unsaved work is still here.</p>
+              <Button className="mt-2" size="sm" onClick={() => void session.auth.bootstrap()}>
+                Retry session check
+              </Button>
+            </div>
+          )}
+          {children}
+        </div>
       </QueryClientProvider>
     </SessionContext.Provider>
   );

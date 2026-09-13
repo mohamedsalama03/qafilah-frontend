@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
-import { StrictMode, useEffect } from "react";
+import userEvent from "@testing-library/user-event";
+import { StrictMode, useEffect, useState } from "react";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/errors";
@@ -58,6 +59,115 @@ const adapterWithIdentity = (): AuthAdapter => ({
   logout: vi.fn(async () => {}),
 });
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((success, failure) => {
+    resolve = success;
+    reject = failure;
+  });
+  return { promise, resolve, reject };
+}
+
+function MerchantForm({
+  expose,
+  mounted,
+  unmounted,
+}: {
+  expose: (session: Session) => void;
+  mounted: () => void;
+  unmounted: () => void;
+}) {
+  const session = useMerchantSession();
+  const [value, setValue] = useState("");
+  useEffect(() => {
+    expose(session);
+    mounted();
+    return unmounted;
+  }, [expose, mounted, session, unmounted]);
+  return (
+    <form>
+      <label>
+        Merchant note
+        <input value={value} onChange={(event) => setValue(event.target.value)} />
+      </label>
+      <button type="button" onClick={() => void session.auth.logout()}>
+        Sign out
+      </button>
+    </form>
+  );
+}
+
+async function merchantFixture(logout: AuthAdapter["logout"] = async () => {}) {
+  const identity = { principalId: "unit-test-principal" };
+  const recheck = deferred<{ principalId: string } | null>();
+  const loadIdentity = vi
+    .fn<AuthAdapter["loadIdentity"]>()
+    .mockResolvedValueOnce(identity)
+    .mockImplementation(() => recheck.promise);
+  const expose = vi.fn<(session: Session) => void>();
+  const mounted = vi.fn();
+  const unmounted = vi.fn();
+  const view = render(
+    <SessionBoundary adapter={{ loadIdentity, logout }}>
+      <MerchantForm expose={expose} mounted={mounted} unmounted={unmounted} />
+    </SessionBoundary>,
+  );
+  const input = await screen.findByRole("textbox", { name: "Merchant note" });
+  const user = userEvent.setup();
+  await user.type(input, "Unsaved merchant edit");
+  const session = expose.mock.calls.at(-1)![0];
+  const scope = session.scope.setScope({
+    principalId: identity.principalId,
+    storeUuid: "d2cfd6a8-b5aa-4df0-a8bf-2d15d90bb2e1",
+  });
+  const cached = { private: "cached merchant value" };
+  session.queryClient.setQueryData(["private-test-cache"], cached);
+  const mutation = session.queryClient.getMutationCache().build(session.queryClient, {
+    mutationFn: async () => "private mutation result",
+  });
+  const operation = deferred<string>();
+  let operationSignal!: AbortSignal;
+  const result = session.scope
+    .run(scope, (signal) => {
+      operationSignal = signal;
+      return operation.promise;
+    })
+    .catch((error: unknown) => error);
+  const preserved = () => {
+    expect(screen.getByRole("textbox", { name: "Merchant note" })).toBe(input);
+    expect(input).toHaveValue("Unsaved merchant edit");
+    expect(input).toBeVisible();
+    expect(mounted).toHaveBeenCalledTimes(1);
+    expect(unmounted).not.toHaveBeenCalled();
+    expect(session.queryClient.getQueryData(["private-test-cache"])).toBe(cached);
+    expect(session.queryClient.getMutationCache().getAll()).toEqual([mutation]);
+    expect(session.scope.getScope()).toBe(scope);
+    expect(operationSignal.aborted).toBe(false);
+  };
+  const purged = () => {
+    expect(session.queryClient.getQueryCache().getAll()).toHaveLength(0);
+    expect(session.queryClient.getMutationCache().getAll()).toHaveLength(0);
+    expect(session.scope.getScope()).toBeNull();
+    expect(operationSignal.aborted).toBe(true);
+    expect(unmounted).toHaveBeenCalledTimes(1);
+  };
+  return {
+    view,
+    user,
+    session,
+    identity,
+    recheck,
+    loadIdentity,
+    input,
+    operation,
+    result,
+    mounted,
+    preserved,
+    purged,
+  };
+}
+
 beforeEach(() => {
   router.replace.mockClear();
   TestBroadcastChannel.channels = [];
@@ -70,6 +180,201 @@ afterEach(() => {
 });
 
 describe("session rendering boundary", () => {
+  it.each(["focus", "hidden-visible", "pageshow"] as const)(
+    "preserves exact unsaved form, query/mutation cache and pending scope work on %s",
+    async (event) => {
+      const fixture = await merchantFixture();
+      if (event === "hidden-visible") {
+        vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+        await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+        fixture.preserved();
+        expect(fixture.loadIdentity).toHaveBeenCalledTimes(1);
+        vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+      }
+      await act(async () => {
+        if (event === "hidden-visible") document.dispatchEvent(new Event("visibilitychange"));
+        else if (event === "pageshow")
+          window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+        window.dispatchEvent(new Event("focus"));
+      });
+      fixture.preserved();
+      expect(fixture.loadIdentity).toHaveBeenCalledTimes(2);
+      expect(fixture.session.auth.getSnapshot()).toMatchObject({
+        status: "authenticated",
+        revalidation: { status: "pending" },
+      });
+      await act(async () => fixture.recheck.resolve(fixture.identity));
+      fixture.preserved();
+      fixture.operation.resolve("completed scoped work");
+      await expect(fixture.result).resolves.toBe("completed scoped work");
+    },
+  );
+
+  it.each(["network", "server", "timeout", "rate-limited"] as const)(
+    "preserves unsaved work on background %s failure and supports explicit retry",
+    async (kind) => {
+      const fixture = await merchantFixture();
+      await act(async () => window.dispatchEvent(new Event("focus")));
+      await act(async () => fixture.recheck.reject(new ApiError(kind)));
+      fixture.preserved();
+      expect(screen.getByRole("status")).toHaveTextContent("Your session couldn’t be rechecked");
+      fixture.loadIdentity.mockResolvedValue(fixture.identity);
+      await fixture.user.click(screen.getByRole("button", { name: "Retry session check" }));
+      expect(fixture.loadIdentity).toHaveBeenCalledTimes(3);
+      expect(
+        screen.queryByText("Your session couldn’t be rechecked. Your unsaved work is still here."),
+      ).not.toBeInTheDocument();
+      fixture.preserved();
+      fixture.operation.resolve("completed after temporary failure");
+      await expect(fixture.result).resolves.toBe("completed after temporary failure");
+    },
+  );
+
+  it.each(["unauthenticated", "session-expired", "forbidden", "no-identity"] as const)(
+    "purges forms, caches and scoped work when revalidation establishes %s authority loss",
+    async (kind) => {
+      const fixture = await merchantFixture();
+      await act(async () => window.dispatchEvent(new Event("focus")));
+      fixture.preserved();
+      await act(async () => {
+        if (kind === "no-identity") fixture.recheck.resolve(null);
+        else fixture.recheck.reject(new ApiError(kind));
+      });
+      fixture.purged();
+      expect(screen.queryByRole("textbox", { name: "Merchant note" })).not.toBeInTheDocument();
+      await expect(fixture.result).resolves.toMatchObject({ kind: "cancelled" });
+    },
+  );
+
+  it("purges principal A before mounting a fresh principal B form", async () => {
+    const fixture = await merchantFixture();
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    await act(async () => fixture.recheck.resolve({ principalId: "principal-b" }));
+    fixture.purged();
+    const nextInput = screen.getByRole("textbox", { name: "Merchant note" });
+    expect(nextInput).not.toBe(fixture.input);
+    expect(nextInput).toHaveValue("");
+    expect(fixture.mounted).toHaveBeenCalledTimes(2);
+    expect(fixture.session.auth.getSnapshot()).toMatchObject({
+      status: "authenticated",
+      principal: { principalId: "principal-b" },
+    });
+    await expect(fixture.result).resolves.toMatchObject({ kind: "cancelled" });
+  });
+
+  it("an old same-principal recheck cannot undo a newer Store switch or cancel its work", async () => {
+    const fixture = await merchantFixture();
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    const nextScope = fixture.session.scope.setScope({
+      principalId: fixture.identity.principalId,
+      storeUuid: "ef1f37c7-f515-452a-b598-ccdafad4902d",
+    });
+    const nextData = { private: "new Store value" };
+    fixture.session.queryClient.setQueryData(["new-store-cache"], nextData);
+    const nextOperation = deferred<string>();
+    let nextSignal!: AbortSignal;
+    const nextResult = fixture.session.scope.run(nextScope, (signal) => {
+      nextSignal = signal;
+      return nextOperation.promise;
+    });
+    await expect(fixture.result).resolves.toMatchObject({ kind: "cancelled" });
+    await act(async () => fixture.recheck.resolve(fixture.identity));
+    expect(fixture.session.scope.getScope()).toBe(nextScope);
+    expect(fixture.session.queryClient.getQueryData(["new-store-cache"])).toBe(nextData);
+    expect(nextSignal.aborted).toBe(false);
+    nextOperation.resolve("new Store operation completed");
+    await expect(nextResult).resolves.toBe("new Store operation completed");
+  });
+
+  it.each([false, true])(
+    "purges on pagehide persisted=%s and restores only after identity recheck",
+    async (persisted) => {
+      const fixture = await merchantFixture();
+      const wrapper = fixture.input.closest("form")?.parentElement;
+      await act(async () =>
+        window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted })),
+      );
+      fixture.purged();
+      expect(wrapper).toHaveAttribute("hidden");
+      expect(screen.queryByRole("textbox", { name: "Merchant note" })).not.toBeInTheDocument();
+      await act(async () =>
+        window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })),
+      );
+      expect(screen.queryByRole("textbox", { name: "Merchant note" })).not.toBeInTheDocument();
+      await act(async () => fixture.recheck.resolve(fixture.identity));
+      expect(screen.getByRole("textbox", { name: "Merchant note" })).toHaveValue("");
+      expect(fixture.mounted).toHaveBeenCalledTimes(2);
+      await expect(fixture.result).resolves.toMatchObject({ kind: "cancelled" });
+    },
+  );
+
+  it.each(["logout", "authority-loss", "pagehide"] as const)(
+    "blocks an abort-ignoring stale revalidation after %s",
+    async (event) => {
+      const fixture = await merchantFixture();
+      await act(async () => window.dispatchEvent(new Event("focus")));
+      await act(async () => {
+        if (event === "logout") await fixture.session.auth.logout();
+        else if (event === "authority-loss")
+          fixture.session.auth.handleApiError(new ApiError("session-expired"));
+        else window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+      });
+      fixture.purged();
+      await act(async () => fixture.recheck.resolve(fixture.identity));
+      expect(screen.queryByRole("textbox", { name: "Merchant note" })).not.toBeInTheDocument();
+      expect(fixture.session.auth.getSnapshot().status).not.toBe("authenticated");
+      await expect(fixture.result).resolves.toMatchObject({ kind: "cancelled" });
+    },
+  );
+
+  it("keeps a failed logout explicit and locally purged across focus, repeated failure and successful retry", async () => {
+    const first = deferred<void>();
+    const retry = deferred<void>();
+    const finalRetry = deferred<void>();
+    const logout = vi
+      .fn<AuthAdapter["logout"]>()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => retry.promise)
+      .mockImplementationOnce(() => finalRetry.promise);
+    const fixture = await merchantFixture(logout);
+    await fixture.user.click(screen.getByRole("button", { name: "Sign out" }));
+    fixture.purged();
+    expect(screen.getByRole("status")).toHaveTextContent("Signing out");
+    await act(async () => first.reject(new ApiError("network", { mutationOutcome: "unknown" })));
+    expect(screen.getByRole("heading", { name: "Sign-out could not be confirmed" })).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent("server may still have an active session");
+    expect(screen.getByRole("alert")).toHaveTextContent("before leaving a shared device");
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      await fixture.session.auth.bootstrap();
+      fixture.session.auth.handleApiError(new ApiError("session-expired"));
+    });
+    expect(fixture.loadIdentity).toHaveBeenCalledTimes(1);
+    expect(logout).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("heading", { name: "Sign-out could not be confirmed" })).toBeVisible();
+    await fixture.user.click(screen.getByRole("button", { name: "Retry sign out" }));
+    expect(logout).toHaveBeenCalledTimes(2);
+    await act(async () => retry.reject(new ApiError("server")));
+    expect(screen.getByRole("heading", { name: "Sign-out could not be confirmed" })).toBeVisible();
+    fixture.purged();
+    await fixture.user.click(screen.getByRole("button", { name: "Retry sign out" }));
+    expect(logout).toHaveBeenCalledTimes(3);
+    await act(async () => finalRetry.resolve());
+    expect(router.replace).toHaveBeenCalledExactlyOnceWith("/login");
+    expect(fixture.session.auth.getSnapshot()).toEqual({
+      status: "unauthenticated",
+      reason: "signed-out",
+    });
+    fixture.purged();
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(fixture.loadIdentity).toHaveBeenCalledTimes(1);
+    await expect(fixture.result).resolves.toMatchObject({ kind: "cancelled" });
+  });
+
   it("never renders private children or redirects when integration is unavailable", async () => {
     render(
       <SessionBoundary>
@@ -199,22 +504,22 @@ describe("session rendering boundary", () => {
     });
     expect(screen.getByText("Private workspace")).toBeVisible();
   });
-  it("hides on tab suspension without fetching until the tab becomes visible", async () => {
+  it("preserves the mounted workspace while hidden and rechecks when visible", async () => {
     const adapter = adapterWithIdentity();
     render(
       <SessionBoundary adapter={adapter}>
         <PrivateContent />
       </SessionBoundary>,
     );
-    await screen.findByText("Private workspace");
+    const workspace = await screen.findByText("Private workspace");
     vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
     act(() => {
       document.dispatchEvent(new Event("visibilitychange"));
     });
-    expect(screen.queryByText("Private workspace")).not.toBeInTheDocument();
+    expect(screen.getByText("Private workspace")).toBe(workspace);
     expect(adapter.loadIdentity).toHaveBeenCalledTimes(1);
     vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
-    act(() => {
+    await act(async () => {
       document.dispatchEvent(new Event("visibilitychange"));
     });
     await screen.findByText("Private workspace");
@@ -223,7 +528,7 @@ describe("session rendering boundary", () => {
   it("starts with empty authority when an adapter is replaced", async () => {
     const first = adapterWithIdentity();
     const second: AuthAdapter = {
-      loadIdentity: () => new Promise(() => {}),
+      loadIdentity: vi.fn<AuthAdapter["loadIdentity"]>(() => new Promise(() => {})),
       logout: async () => {},
     };
     const view = render(
@@ -232,11 +537,14 @@ describe("session rendering boundary", () => {
       </SessionBoundary>,
     );
     await screen.findByText("Private workspace");
-    view.rerender(
-      <SessionBoundary adapter={second}>
-        <PrivateContent />
-      </SessionBoundary>,
-    );
+    await act(async () => {
+      view.rerender(
+        <SessionBoundary adapter={second}>
+          <PrivateContent />
+        </SessionBoundary>,
+      );
+    });
+    expect(second.loadIdentity).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("Private workspace")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Checking your session");
   });

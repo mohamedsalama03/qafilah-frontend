@@ -25,26 +25,28 @@ export function PageHeader({
   breadcrumbs,
 }: PageHeaderProps) {
   return (
-    <header className="mb-6 space-y-3">
+    <header className="mb-6 min-w-0 space-y-3 [overflow-wrap:anywhere]">
       {breadcrumbs && breadcrumbs.length > 0 && (
         <nav aria-label="Breadcrumb">
           <ol className="flex flex-wrap items-center gap-1 text-xs text-text-muted">
             {breadcrumbs.map((item, index) => (
               <li
                 key={`${item.href ?? "current"}-${item.label}`}
-                className="inline-flex items-center gap-1"
+                className="inline-flex min-w-0 max-w-full items-center gap-1"
               >
-                {index > 0 && <ChevronRight aria-hidden="true" className="size-3 rtl:rotate-180" />}
+                {index > 0 && (
+                  <ChevronRight aria-hidden="true" className="size-3 shrink-0 rtl:rotate-180" />
+                )}
                 {item.href ? (
                   <Link
                     href={item.href}
                     prefetch={false}
-                    className="rounded px-1 py-1 hover:text-text focus-visible:outline-2 focus-visible:outline-focus"
+                    className="min-w-0 rounded px-1 py-1 hover:text-text focus-visible:outline-2 focus-visible:outline-focus"
                   >
                     {item.label}
                   </Link>
                 ) : (
-                  <span aria-current="page" className="px-1">
+                  <span aria-current="page" className="min-w-0 px-1">
                     {item.label}
                   </span>
                 )}
@@ -54,9 +56,11 @@ export function PageHeader({
         </nav>
       )}
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
+        <div className="min-w-0 max-w-full">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-semibold tracking-tight text-text">{title}</h1>
+            <h1 className="min-w-0 max-w-full text-2xl font-semibold tracking-tight text-text">
+              {title}
+            </h1>
             {status}
           </div>
           {description && (

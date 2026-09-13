@@ -49,7 +49,7 @@ export function FormField({
     .filter(Boolean)
     .join(" ");
   return (
-    <div className={cn("space-y-1.5", className)}>
+    <div className={cn("min-w-0 space-y-1.5 [overflow-wrap:anywhere]", className)}>
       <label htmlFor={id} className="block text-sm font-medium text-text">
         {label}
         {required && (
@@ -83,7 +83,7 @@ export function FormError({ message }: { message?: string }) {
   return (
     <p
       role="alert"
-      className="rounded-md border border-danger/25 bg-danger-subtle px-3 py-2 text-sm leading-6 text-danger"
+      className="min-w-0 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2 text-sm leading-6 text-danger [overflow-wrap:anywhere]"
     >
       {message}
     </p>

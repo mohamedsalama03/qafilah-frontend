@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Toast } from "@/components/ui/toast";
 import { ApiError, type ApiErrorKind } from "@/lib/api/errors";
+import { ActionMenu } from "@/components/ui/action-menu";
 
 const errorKinds: { value: ApiErrorKind; label: string; title: string }[] = [
   { value: "forbidden", label: "403 · Permission denied", title: "You don’t have access" },
@@ -79,6 +80,22 @@ export function ComponentsPattern() {
                   <Button pending pendingLabel="Saving…">
                     Save
                   </Button>
+                  <ActionMenu
+                    label="Example resource actions"
+                    actions={[
+                      {
+                        id: "inspect",
+                        label: "Inspect example",
+                        onSelect: () => setNotice("Inspect action preview. No store data changed."),
+                      },
+                      {
+                        id: "clear",
+                        label: "Clear example action",
+                        destructive: true,
+                        onSelect: () => setNotice("Clear action preview. No store data changed."),
+                      },
+                    ]}
+                  />
                   <Tooltip content="An accessible icon-only control">
                     <IconButton
                       label="About this example"

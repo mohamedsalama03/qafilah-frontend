@@ -72,8 +72,8 @@ export function AppShell({
               aria-current={active ? "page" : undefined}
               className={`flex min-h-10 items-center gap-2.5 rounded-sm px-3 text-[13px] transition-colors lg:min-h-9 ${active ? "bg-brand-subtle font-semibold text-brand" : "text-text-muted hover:bg-surface-subtle hover:text-text"}`}
             >
-              <Icon size={17} strokeWidth={1.7} aria-hidden="true" />
-              <span>{item.label}</span>
+              <Icon size={17} strokeWidth={1.7} aria-hidden="true" className="shrink-0" />
+              <span className="min-w-0 [overflow-wrap:anywhere]">{item.label}</span>
             </Link>
           );
         })}
@@ -96,12 +96,12 @@ export function AppShell({
         {navigationContent}
       </aside>
       <div className="lg:ps-sidebar">
-        <header className="sticky top-0 z-10 flex h-topbar items-center justify-between gap-3 border-b border-border bg-surface px-4 lg:px-7">
+        <header className="sticky top-0 z-10 flex min-h-topbar items-center justify-between gap-3 border-b border-border bg-surface px-4 lg:px-7">
           <div className="flex min-w-0 items-center gap-3">
             <Dialog.Root open={mobileOpen} onOpenChange={setMobileOpen}>
               <Dialog.Trigger asChild>
                 <button
-                  className="flex size-11 items-center justify-center rounded-sm hover:bg-surface-subtle lg:hidden"
+                  className="flex size-11 shrink-0 items-center justify-center rounded-sm hover:bg-surface-subtle lg:hidden"
                   aria-label="Open navigation"
                 >
                   <Menu size={20} />
@@ -134,12 +134,14 @@ export function AppShell({
             />
             <span className="truncate text-[13px] font-medium">{title}</span>
           </div>
-          {storeContext ?? (
-            <span className="flex items-center gap-2 text-xs text-text-muted">
-              <span className="size-1.5 rounded-full bg-text-muted" />
-              No store connected
-            </span>
-          )}
+          <div className="min-w-0 max-w-[50%] [overflow-wrap:anywhere]">
+            {storeContext ?? (
+              <span className="flex items-center gap-2 text-xs text-text-muted">
+                <span className="size-1.5 shrink-0 rounded-full bg-text-muted" />
+                <span className="min-w-0">No store connected</span>
+              </span>
+            )}
+          </div>
         </header>
         {review && (
           <div className="border-b border-border bg-surface-subtle px-5 py-2 text-xs text-text-muted lg:px-7">

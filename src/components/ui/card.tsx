@@ -14,7 +14,7 @@ export function CardHeader({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
       className={cn(
-        "flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4",
+        "flex min-w-0 flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4 [overflow-wrap:anywhere]",
         className,
       )}
       {...props}
@@ -23,5 +23,5 @@ export function CardHeader({ className, ...props }: ComponentProps<"div">) {
 }
 
 export function CardContent({ className, ...props }: ComponentProps<"div">) {
-  return <div className={cn("p-5", className)} {...props} />;
+  return <div className={cn("min-w-0 p-5", className)} {...props} />;
 }

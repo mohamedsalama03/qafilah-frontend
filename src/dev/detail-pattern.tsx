@@ -65,7 +65,7 @@ export function DetailPattern() {
                   className="text-text-muted"
                 />
               </div>
-              <div>
+              <div className="min-w-0">
                 <h3 className="text-base font-semibold">Everyday canvas tote</h3>
                 <p className="mt-1.5 max-w-prose text-sm leading-6 text-text-muted">
                   A simple example showing how names, descriptions and secondary information fit

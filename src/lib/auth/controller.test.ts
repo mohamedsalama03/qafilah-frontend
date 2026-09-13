@@ -24,6 +24,74 @@ describe("deterministic authentication authority", () => {
       principal: { principalId: "principal-a" },
     });
   });
+  it("does not revoke authority during a deduplicated same-principal recheck", async () => {
+    const purge = vi.fn();
+    const loadIdentity = vi.fn(async () => ({ principalId: "principal-a" }));
+    const controller = createAuthController({
+      onAuthorityLost: purge,
+      adapter: { loadIdentity, logout: async () => {} },
+    });
+    await controller.bootstrap();
+    const previous = controller.getSnapshot();
+    const first = controller.bootstrap();
+    const second = controller.bootstrap();
+    expect(first).toBe(second);
+    expect(controller.getSnapshot()).toMatchObject({
+      status: "authenticated",
+      revalidation: { status: "pending" },
+    });
+    await first;
+    expect(controller.getSnapshot()).toEqual(previous);
+    expect(purge).not.toHaveBeenCalled();
+    expect(loadIdentity).toHaveBeenCalledTimes(2);
+  });
+  it("cannot restore an older principal after newer authority is established", async () => {
+    let finishOld!: (identity: { principalId: string }) => void;
+    const loadIdentity = vi
+      .fn()
+      .mockResolvedValueOnce({ principalId: "principal-a" })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishOld = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({ principalId: "principal-b" });
+    const controller = createAuthController({ adapter: { loadIdentity, logout: async () => {} } });
+    await controller.bootstrap();
+    const oldRecheck = controller.bootstrap();
+    await Promise.resolve();
+    controller.handleApiError(new ApiError("forbidden"));
+    await controller.bootstrap();
+    finishOld({ principalId: "principal-a" });
+    await oldRecheck;
+    expect(controller.getSnapshot()).toEqual({
+      status: "authenticated",
+      principal: { principalId: "principal-b" },
+    });
+  });
+  it("a fresh document after failed logout starts unresolved and rechecks remote authority without claiming logout succeeded", async () => {
+    const loadIdentity = vi.fn(async () => ({ principalId: "principal-a" }));
+    const adapter = {
+      loadIdentity,
+      logout: async () => {
+        throw new ApiError("network");
+      },
+    };
+    const previousDocument = createAuthController({ adapter });
+    await previousDocument.bootstrap();
+    await previousDocument.logout();
+    expect(previousDocument.getSnapshot().status).toBe("logout-failed");
+    previousDocument.dispose();
+    const newDocument = createAuthController({ adapter });
+    expect(newDocument.getSnapshot()).toEqual({ status: "bootstrapping" });
+    await newDocument.bootstrap();
+    expect(loadIdentity).toHaveBeenCalledTimes(2);
+    expect(newDocument.getSnapshot()).toEqual({
+      status: "authenticated",
+      principal: { principalId: "principal-a" },
+    });
+  });
   it("logout rejects stale identity returned from an abort-ignoring adapter", async () => {
     let finish: (value: { principalId: string }) => void = () => {
       throw new Error("No request");
@@ -43,8 +111,8 @@ describe("deterministic authentication authority", () => {
     const bootstrap = controller.bootstrap();
     await Promise.resolve();
     const signout = controller.logout();
-    expect(controller.getSnapshot().status).toBe("bootstrapping");
-    expect(purge).toHaveBeenCalledTimes(2);
+    expect(controller.getSnapshot().status).toBe("logging-out");
+    expect(purge).toHaveBeenCalledTimes(1);
     finish({ principalId: "previous-merchant" });
     await Promise.all([bootstrap, signout]);
     expect(controller.getSnapshot()).toEqual({ status: "unauthenticated", reason: "signed-out" });
@@ -64,7 +132,7 @@ describe("deterministic authentication authority", () => {
       await controller.bootstrap();
       controller.handleApiError(new ApiError(kind));
       expect(controller.getSnapshot()).toEqual({ status: "unauthenticated", reason: "expired" });
-      expect(purge).toHaveBeenCalledTimes(2);
+      expect(purge).toHaveBeenCalledTimes(1);
     },
   );
   it("drops cached authority on permission loss and requires refresh", async () => {
@@ -82,7 +150,7 @@ describe("deterministic authentication authority", () => {
       status: "error",
       error: { kind: "forbidden" },
     });
-    expect(purge).toHaveBeenCalledTimes(2);
+    expect(purge).toHaveBeenCalledTimes(1);
   });
   it("never restores merchant data or claims successful server logout after network loss", async () => {
     const controller = createAuthController({
@@ -96,7 +164,7 @@ describe("deterministic authentication authority", () => {
     await controller.bootstrap();
     await controller.logout();
     expect(controller.getSnapshot()).toMatchObject({
-      status: "error",
+      status: "logout-failed",
       error: { kind: "network", mutationOutcome: "unknown" },
     });
     expect(controller.getSnapshot()).not.toHaveProperty("principal");
@@ -145,7 +213,7 @@ describe("deterministic authentication authority", () => {
     const pending = controller.logout();
     await Promise.resolve();
     controller.suspend();
-    expect(controller.getSnapshot()).toEqual({ status: "bootstrapping" });
+    expect(controller.getSnapshot()).toEqual({ status: "logging-out" });
     expect(logoutSignal?.aborted).toBe(false);
     finish();
     await pending;
@@ -165,9 +233,13 @@ describe("post-login redirect safety", () => {
     "/%zz",
     null,
   ])("rejects unsafe return path %s", (path) => {
-    expect(safeReturnPath(path)).toBe("/");
+    const output = safeReturnPath(path);
+    expect(output).toBe("/");
+    expect(new URL(output, "https://merchant.example").origin).toBe("https://merchant.example");
   });
   it("preserves a safe local path and query", () => {
-    expect(safeReturnPath("/access?context=expired")).toBe("/access?context=expired");
+    const output = safeReturnPath("/access?context=expired");
+    expect(output).toBe("/access?context=expired");
+    expect(new URL(output, "https://merchant.example").origin).toBe("https://merchant.example");
   });
 });

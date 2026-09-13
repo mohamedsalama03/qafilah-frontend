@@ -37,7 +37,7 @@ export function ActionMenu({ label, actions }: { label: string; actions: Resourc
                 onSelect={action.onSelect}
                 disabled={action.disabled}
                 className={cn(
-                  "flex min-h-11 cursor-default items-center rounded px-3 py-2 text-sm outline-none focus:bg-surface-subtle data-[disabled]:pointer-events-none data-[disabled]:opacity-50 md:min-h-8",
+                  "flex min-h-11 cursor-default items-center rounded px-3 py-2 text-sm outline-none focus:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-solid focus-visible:outline-focus data-[disabled]:pointer-events-none data-[disabled]:opacity-50 md:min-h-8",
                   action.destructive ? "text-danger" : "text-text",
                 )}
               >

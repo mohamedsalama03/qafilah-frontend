@@ -49,7 +49,8 @@ export function inspectArchitecture(filename: string, source: string): Architect
     true,
     ts.ScriptKind.TSX,
   );
-  const aliases = new Map<string, ts.Expression>();
+  type Binding = ts.Expression | ts.FunctionDeclaration | null;
+  const bindings = new Map<ts.Node, Map<string, Binding>>();
   const destructured = new Map<string, string>();
   const path = filename.replaceAll("\\", "/");
   const centralApi = /(^|\/)src\/lib\/api\//.test(path);
@@ -71,21 +72,51 @@ export function inspectArchitecture(filename: string, source: string): Architect
     violations.push({ rule, file: filename, line: line + 1, column: character + 1 });
   }
 
+  function bind(name: ts.Identifier, value: Binding): void {
+    let scope = name.parent.parent;
+    while (
+      scope.parent &&
+      !ts.isBlock(scope) &&
+      !ts.isSourceFile(scope) &&
+      !ts.isFunctionLike(scope) &&
+      !ts.isForStatement(scope) &&
+      !ts.isForOfStatement(scope) &&
+      !ts.isForInStatement(scope)
+    )
+      scope = scope.parent;
+    const locals = bindings.get(scope) ?? new Map<string, Binding>();
+    locals.set(name.text, value);
+    bindings.set(scope, locals);
+  }
+
+  function bindingFor(name: ts.Identifier): Binding | undefined {
+    for (let scope: ts.Node | undefined = name.parent; scope; scope = scope.parent) {
+      const locals = bindings.get(scope);
+      if (locals?.has(name.text)) return locals.get(name.text);
+    }
+    return undefined;
+  }
+
   visit(file, (node) => {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer)
-      aliases.set(node.name.text, node.initializer);
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name))
+      bind(node.name, node.initializer ?? null);
+    if (ts.isParameter(node) && ts.isIdentifier(node.name)) bind(node.name, null);
+    if (ts.isFunctionDeclaration(node) && node.name) bind(node.name, node);
   });
 
   function literal(
     expression: ts.Expression | undefined,
-    seen = new Set<string>(),
+    seen = new Set<ts.Node>(),
   ): string | undefined {
     if (!expression) return undefined;
     const node = unwrap(expression);
     if (ts.isStringLiteralLike(node)) return node.text;
-    if (ts.isIdentifier(node) && !seen.has(node.text)) {
-      seen.add(node.text);
-      return literal(aliases.get(node.text), seen);
+    if (ts.isIdentifier(node)) {
+      const binding = bindingFor(node);
+      if (binding && !ts.isFunctionDeclaration(binding) && !seen.has(binding)) {
+        seen.add(binding);
+        return literal(binding, seen);
+      }
     }
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
       const left = literal(node.left, new Set(seen));
@@ -101,15 +132,19 @@ export function inspectArchitecture(filename: string, source: string): Architect
     return undefined;
   }
 
-  function expressionPath(expression: ts.Expression, seen = new Set<string>()): string | undefined {
+  function expressionPath(
+    expression: ts.Expression,
+    seen = new Set<ts.Node>(),
+  ): string | undefined {
     const node = unwrap(expression);
     if (ts.isIdentifier(node)) {
-      if (seen.has(node.text)) return undefined;
-      seen.add(node.text);
       const destructuredPath = destructured.get(node.text);
       if (destructuredPath) return destructuredPath;
-      const alias = aliases.get(node.text);
-      return alias ? expressionPath(alias, seen) : node.text;
+      const alias = bindingFor(node);
+      if (!alias || ts.isFunctionDeclaration(alias)) return node.text;
+      if (seen.has(alias)) return undefined;
+      seen.add(alias);
+      return expressionPath(alias, seen);
     }
     if (ts.isPropertyAccessExpression(node)) {
       const object = expressionPath(node.expression, seen);
@@ -119,6 +154,29 @@ export function inspectArchitecture(filename: string, source: string): Architect
       const object = expressionPath(node.expression, seen);
       const property = literal(node.argumentExpression);
       return object && property ? `${object}.${property}` : undefined;
+    }
+    // Preserve the constructor identity through `const headers = new Headers()`.
+    // Previously the identifier resolved to a NewExpression and lost its path,
+    // so the later set/append invocation was never inspected as a header write.
+    if (ts.isNewExpression(node)) return expressionPath(node.expression, seen);
+    if (ts.isCallExpression(node)) {
+      const called = unwrap(node.expression);
+      const helper = ts.isIdentifier(called) ? bindingFor(called) : called;
+      if (
+        helper &&
+        (ts.isFunctionDeclaration(helper) ||
+          ts.isFunctionExpression(helper) ||
+          ts.isArrowFunction(helper)) &&
+        helper.body
+      ) {
+        if (seen.has(helper)) return undefined;
+        seen.add(helper);
+        if (!ts.isBlock(helper.body)) return expressionPath(helper.body, seen);
+        const returns = helper.body.statements.filter(ts.isReturnStatement);
+        // Bounded local helper resolution; no execution or whole-program analysis.
+        if (returns.length === 1 && returns[0]?.expression)
+          return expressionPath(returns[0].expression, seen);
+      }
     }
     return undefined;
   }
@@ -199,11 +257,14 @@ export function inspectArchitecture(filename: string, source: string): Architect
       report("central-api-boundary", expression);
   }
 
-  function resolveExpression(expression: ts.Expression, seen = new Set<string>()): ts.Expression {
+  function resolveExpression(expression: ts.Expression, seen = new Set<ts.Node>()): ts.Expression {
     const node = unwrap(expression);
-    if (ts.isIdentifier(node) && aliases.has(node.text) && !seen.has(node.text)) {
-      seen.add(node.text);
-      return resolveExpression(aliases.get(node.text)!, seen);
+    if (ts.isIdentifier(node)) {
+      const binding = bindingFor(node);
+      if (binding && !ts.isFunctionDeclaration(binding) && !seen.has(binding)) {
+        seen.add(binding);
+        return resolveExpression(binding, seen);
+      }
     }
     return node;
   }
@@ -270,7 +331,8 @@ export function inspectArchitecture(filename: string, source: string): Architect
           report("token-authentication", node);
       }
       if (ts.isNewExpression(node) && target === "Headers") {
-        const entries = node.arguments?.[0];
+        const argument = node.arguments?.[0];
+        const entries = argument ? resolveExpression(argument) : undefined;
         if (entries && ts.isArrayLiteralExpression(entries)) {
           for (const entry of entries.elements) {
             if (

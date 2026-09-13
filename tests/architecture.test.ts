@@ -77,6 +77,62 @@ describe("permanent executable architecture boundaries", () => {
       'const key = "Authorization"; const headers = { [key]: token };',
     ],
     ["Authorization setter", "token-authentication", 'headers.set("authorization", token);'],
+    [
+      "identifier-bound Headers mutation-only Bearer setter",
+      "token-authentication",
+      'const headers = new Headers(); if (mutation) { headers.set("Authorization", "Bearer " + token); }',
+      "src/lib/api/client.ts",
+    ],
+    [
+      "identifier-bound Headers lowercase append",
+      "token-authentication",
+      'const headers = new Headers(); headers.append("authorization", token);',
+    ],
+    [
+      "identifier-bound Headers uppercase setter",
+      "token-authentication",
+      'const headers = new Headers(); headers.set("AUTHORIZATION", token);',
+    ],
+    [
+      "Headers constructor object",
+      "token-authentication",
+      'new Headers({ authorization: "Bearer " + token });',
+    ],
+    [
+      "Headers constructor aliased tuples",
+      "token-authentication",
+      'const entries = [["Authorization", token]]; new Headers(entries);',
+    ],
+    [
+      "Headers instance alias and computed setter",
+      "token-authentication",
+      'const headers = new Headers(); const copy = headers; const name = "Authorization"; copy["set"](name, token);',
+    ],
+    [
+      "local Headers factory helper",
+      "token-authentication",
+      'function makeHeaders() { return new Headers(); } const headers = makeHeaders(); headers.append("Authorization", token);',
+    ],
+    [
+      "arrow Headers factory helper",
+      "token-authentication",
+      'const makeHeaders = () => new Headers(); const headers = makeHeaders(); headers.set("Authorization", token);',
+    ],
+    [
+      "local factory returns a same-named Headers binding",
+      "token-authentication",
+      'function makeHeaders() { const headers = new Headers(); return headers; } const headers = makeHeaders(); headers.set("Authorization", token);',
+    ],
+    [
+      "nested decoy binding cannot hide an outer Headers instance",
+      "token-authentication",
+      'const headers = new Headers(); function example() { const headers = "comment-like data"; } headers.set("Authorization", token);',
+    ],
+    [
+      "helper mutates a Headers parameter",
+      "token-authentication",
+      'function authorize(headers: Headers, token: string) { headers.set("Authorization", "Bearer " + token); } authorize(new Headers(), token);',
+    ],
     ["Authorization tuple", "token-authentication", 'new Headers([["Authorization", token]]);'],
     [
       "XHR Authorization header",
@@ -173,6 +229,10 @@ describe("permanent executable architecture boundaries", () => {
       const example = 'fetch("/not-a-real-request")';
       const message = <p>Do not persist tokens in localStorage.</p>;
       const validator = /authorization|cookie|host/;
+      // const headers = new Headers(); if (mutation) headers.set("Authorization", "Bearer " + token);
+      const headerExample = 'const headers = new Headers(); headers.append("AUTHORIZATION", "Bearer " + token)';
+      const headers = new Headers({ Accept: "application/json" });
+      headers.set("X-Request-ID", "synthetic");
     `;
     expect(inspectArchitecture(merchantFile, source)).toEqual([]);
   });
@@ -216,6 +276,21 @@ describe("permanent executable architecture boundaries", () => {
     expect(mutant).not.toBe(source);
     expect(inspectArchitecture(file, mutant).map((violation) => violation.rule)).toContain(
       "production-development-import",
+    );
+  });
+
+  it("rejects the original mutation-only Bearer mutant in the actual transport source", () => {
+    const file = "src/lib/api/client.ts";
+    const source = readFileSync(join(root, file), "utf8");
+    expect(inspectArchitecture(file, source)).toEqual([]);
+    const anchor = "if (mutation && options.csrf) {";
+    const mutant = source.replace(
+      anchor,
+      `${anchor}\n headers.set("Authorization", "Bearer " + "mutation-only-token");`,
+    );
+    expect(mutant).not.toBe(source);
+    expect(inspectArchitecture(file, mutant).map((violation) => violation.rule)).toContain(
+      "token-authentication",
     );
   });
 });

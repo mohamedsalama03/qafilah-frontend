@@ -1,5 +1,7 @@
 # Qafilah Merchant Dashboard — F1 implementation and verification
 
+**Historical baseline report.** Agent 2 subsequently rejected the baseline with two Medium and six Low findings. The original gate counts and Git state below describe that earlier delivery, not current certification. Product Authority then initialized/published the unchanged baseline at `ed71b2b0ee6db46cb5e358b079715e5c419170b0`. See the [focused remediation report](F1-remediation-report.md) and updated [architecture](architecture.md) for the corrected lifecycle, redirect, guard, overflow/focus and documentation behavior. Independent focused re-review remains pending.
+
 Date: 2026-09-13. Authorized frontend: `D:\customers\qafilah\dashboard frontend`.
 
 The frontend architecture and interface foundation are complete. Real Laravel integration is unavailable: **zero verified backend contracts, zero consumed backend endpoints and zero invented endpoints**. Production renders an honest unavailable sign-in state. Shell, overview, table, detail, form and component examples are development-only. They are not completed commerce features or authenticated merchant pages.
