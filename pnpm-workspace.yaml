@@ -1,0 +1,8 @@
+packages:
+  - .
+
+saveExact: true
+engineStrict: true
+
+# No dependency requires an install-time script in this foundation.
+allowBuilds: {}
