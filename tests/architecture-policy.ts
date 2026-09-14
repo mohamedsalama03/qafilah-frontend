@@ -7,7 +7,10 @@ export type ArchitectureRule =
   | "unsafe-html"
   | "merchant-surface-boundary"
   | "production-development-import"
-  | "restricted-image-hosts";
+  | "restricted-image-hosts"
+  | "verified-contract-registry"
+  | "role-derived-authority"
+  | "uuid-derived-authority";
 
 export interface ArchitectureViolation {
   rule: ArchitectureRule;
@@ -31,6 +34,7 @@ function unwrap(expression: ts.Expression): ts.Expression {
   if (
     ts.isParenthesizedExpression(expression) ||
     ts.isAsExpression(expression) ||
+    ts.isSatisfiesExpression(expression) ||
     ts.isSatisfiesExpression(expression) ||
     ts.isNonNullExpression(expression) ||
     ts.isTypeAssertionExpression(expression)
@@ -300,7 +304,187 @@ export function inspectArchitecture(filename: string, source: string): Architect
     }
   }
 
+  // This is the six-contract F2 activation boundary, independent of descriptive evidence text.
+  const verifiedContracts: Record<string, readonly [string, string]> = {
+    csrf: ["GET", "/sanctum/csrf-cookie"],
+    login: ["POST", "/api/v1/auth/login"],
+    identity: ["GET", "/api/v1/me"],
+    logout: ["POST", "/api/v1/auth/logout"],
+    stores: ["GET", "/api/v1/me/stores?page={value}"],
+    context: ["GET", "/api/v1/stores/{value}/context"],
+  };
+
+  function registryEntry(node: ts.ObjectLiteralExpression): string | undefined {
+    let entry: ts.Node = node;
+    while (
+      ts.isAsExpression(entry.parent) ||
+      ts.isSatisfiesExpression(entry.parent) ||
+      ts.isParenthesizedExpression(entry.parent)
+    )
+      entry = entry.parent;
+    if (!ts.isPropertyAssignment(entry.parent)) return undefined;
+    const property = entry.parent;
+    let declaration: ts.Node = property.parent;
+    while (
+      ts.isAsExpression(declaration.parent) ||
+      ts.isSatisfiesExpression(declaration.parent) ||
+      ts.isParenthesizedExpression(declaration.parent)
+    )
+      declaration = declaration.parent;
+    return ts.isVariableDeclaration(declaration.parent) &&
+      ts.isIdentifier(declaration.parent.name) &&
+      declaration.parent.name.text === "merchantContracts"
+      ? nameOf(property.name)
+      : undefined;
+  }
+
+  function contractPath(expression: ts.Expression): string | undefined {
+    const node = resolveExpression(expression);
+    if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+      if (!ts.isBlock(node.body)) return contractPath(node.body);
+      const statements = node.body.statements;
+      return statements.length === 1 &&
+        ts.isReturnStatement(statements[0]) &&
+        statements[0].expression
+        ? contractPath(statements[0].expression)
+        : undefined;
+    }
+    if (ts.isTemplateExpression(node))
+      return (
+        node.head.text + node.templateSpans.map((span) => `{value}${span.literal.text}`).join("")
+      );
+    return literal(node);
+  }
+
+  function inspectContract(node: ts.ObjectLiteralExpression): void {
+    const properties = new Map(
+      node.properties.flatMap((property) =>
+        ts.isPropertyAssignment(property)
+          ? [[nameOf(property.name), property.initializer] as const]
+          : [],
+      ),
+    );
+    const entry = registryEntry(node);
+    if (
+      entry === undefined &&
+      !(
+        properties.has("path") &&
+        (properties.has("method") ||
+          properties.has("decode") ||
+          properties.has("evidence") ||
+          node.properties.some(ts.isSpreadAssignment))
+      )
+    )
+      return;
+    const expected = entry === undefined ? undefined : verifiedContracts[entry];
+    const method = properties.get("method");
+    const pathExpression = properties.get("path");
+    if (
+      path !== "src/lib/backend/contracts.ts" ||
+      !expected ||
+      !method ||
+      literal(method) !== expected[0] ||
+      !pathExpression ||
+      contractPath(pathExpression) !== expected[1] ||
+      node.properties.some(ts.isSpreadAssignment)
+    )
+      report("verified-contract-registry", node);
+  }
+
+  function roleDescriptor(expression: ts.Expression): boolean {
+    const target = expressionPath(expression);
+    return (
+      !!target &&
+      /(?:^|\.)(?:[A-Za-z_$]*[Rr]ole)\.(?:name|kind)(?:\.|$)|(?:^|\.)(?:roleName|roleKind)$/.test(
+        target,
+      )
+    );
+  }
+
+  function containsRoleDescriptor(expression: ts.Expression): boolean {
+    let found = false;
+    visit(expression, (node) => {
+      if (ts.isExpression(node) && roleDescriptor(node)) found = true;
+    });
+    return found;
+  }
+
+  function capabilityName(name: string | undefined): boolean {
+    return (
+      !!name &&
+      /^(?:can[A-Z_]|has(?:Access|Permission|Authority|Membership)|is(?:Allowed|Authorized|Owner|Member)|allowed$|authorized$)/.test(
+        name,
+      )
+    );
+  }
+
+  function uuidTruthiness(expression: ts.Expression): boolean {
+    const node = resolveExpression(expression);
+    if (ts.isArrowFunction(node) && !ts.isBlock(node.body)) return uuidTruthiness(node.body);
+    if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken)
+      return uuidTruthiness(node.operand);
+    if (
+      ts.isCallExpression(node) &&
+      expressionPath(node.expression) === "Boolean" &&
+      node.arguments[0]
+    )
+      return uuidTruthiness(node.arguments[0]);
+    const target = expressionPath(node);
+    return !!target && /(?:^|\.)(?:storeUuid|storeId|store_id|store\.id)$/.test(target);
+  }
+
   visit(file, (node) => {
+    if (ts.isObjectLiteralExpression(node)) inspectContract(node);
+    if (
+      ts.isBinaryExpression(node) &&
+      [
+        ts.SyntaxKind.EqualsEqualsToken,
+        ts.SyntaxKind.EqualsEqualsEqualsToken,
+        ts.SyntaxKind.ExclamationEqualsToken,
+        ts.SyntaxKind.ExclamationEqualsEqualsToken,
+        ts.SyntaxKind.AmpersandAmpersandToken,
+        ts.SyntaxKind.BarBarToken,
+      ].includes(node.operatorToken.kind) &&
+      (containsRoleDescriptor(node.left) || containsRoleDescriptor(node.right))
+    )
+      report("role-derived-authority", node);
+    if (
+      ts.isCallExpression(node) &&
+      expressionPath(node.expression)?.endsWith(".includes") &&
+      (containsRoleDescriptor(node.expression) || node.arguments.some(containsRoleDescriptor))
+    )
+      report("role-derived-authority", node);
+    if (
+      (ts.isIfStatement(node) || ts.isConditionalExpression(node)) &&
+      containsRoleDescriptor(ts.isIfStatement(node) ? node.expression : node.condition)
+    )
+      report("role-derived-authority", node);
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      capabilityName(node.name.text) &&
+      node.initializer
+    ) {
+      if (uuidTruthiness(node.initializer)) report("uuid-derived-authority", node);
+      if (containsRoleDescriptor(node.initializer)) report("role-derived-authority", node);
+    }
+    if (
+      ts.isPropertyAssignment(node) &&
+      capabilityName(nameOf(node.name)) &&
+      uuidTruthiness(node.initializer)
+    )
+      report("uuid-derived-authority", node);
+    if (ts.isReturnStatement(node) && node.expression && uuidTruthiness(node.expression)) {
+      let parent: ts.Node | undefined = node.parent;
+      while (parent && !ts.isFunctionLike(parent)) parent = parent.parent;
+      if (
+        parent &&
+        (ts.isFunctionDeclaration(parent) || ts.isMethodDeclaration(parent)) &&
+        parent.name &&
+        capabilityName(nameOf(parent.name))
+      )
+        report("uuid-derived-authority", node);
+    }
     if (
       ts.isImportDeclaration(node) &&
       ts.isStringLiteral(node.moduleSpecifier) &&

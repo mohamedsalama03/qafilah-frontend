@@ -44,6 +44,10 @@ export function createScopeController(queryClient: QueryClient) {
     clear(): void {
       revoke(true);
     },
+    /** Revoke the selected Store while retaining separately keyed principal discovery. */
+    clearStore(): void {
+      revoke(false);
+    },
     assertCurrent,
     async run<T>(
       scope: QueryScope,

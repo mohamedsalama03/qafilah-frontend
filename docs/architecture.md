@@ -1,4 +1,20 @@
-# F1 architecture and security decisions
+# Frontend architecture and security decisions
+
+## F2 activation
+
+F2 activates the six contracts in `backend-contracts.md` against published backend `6614690a3b24b39f45c7c1b9ed85c20ecb22cbbf`. The F1 design and lifecycle described in the historical sections below remain foundations; statements there about unavailable contracts describe F1 only.
+
+`lib/backend` owns the source-linked endpoint registry, strict DTO decoders and the real cookie-session adapter. `lib/api` remains the only request transport. `features/auth` owns the stable API provider and login form. `/login` accepts credentials only when a valid API origin is configured. `/me` establishes authority; the UI never infers identity from a cookie. Only safe local return paths are allowed. Root layout holds the stable API provider; the merchant layout holds the existing session boundary.
+
+`lib/stores` owns complete principal-scoped discovery and selected Store lifecycle. `/` presents zero/one/multiple eligible Store flows; `/stores/[storeUuid]` renders only a matching verified context. Store navigation synchronously cancels old scoped work, purges cached data/mutations and increments scope revision. Requests bind acceptance to principal, UUID and generation. Routine same-principal and same-Store rechecks preserve mounted work and scope. Context403/404 revokes selected Store authority and returns safe access guidance; only identity/session401/419 revokes globally. Permissions are current explicit grants for truthful presentation, never an authorization substitute.
+
+No Product, Order, Inventory, Customer, Shipping, Payment, Platform or storefront API is added. The overview contains current Store context rather than fabricated metrics. No local/session storage or IndexedDB is used. Tokenless cross-tab invalidation and page-history privacy behavior are preserved. Failed logout retains its explicit retry state without silently restoring a workspace.
+
+`tests/integration` uses an exact backend source snapshot, separate PostgreSQL/Redis and generated synthetic fixtures. Its PHP control is frontend-owned, copied into the disposable container only, and guarded by the exact isolated database name. It reuses backend test helpers/actions; it exposes no HTTP control endpoint. Existing backend schema is initialized only in the disposable database. Browser traces/video are disabled to avoid retaining credentials/cookies. Backend checkout and shared services remain untouched.
+
+The F2 report distinguishes source evidence, isolated local browser results, production build/container checks and deployment limitations. F1 reports remain historical certification evidence.
+
+## Historical F1 architecture (unavailable-contract statements apply to F1)
 
 ## Authority and routes
 

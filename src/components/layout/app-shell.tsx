@@ -36,12 +36,18 @@ export function AppShell({
   title,
   review = false,
   storeContext,
+  sidebarStoreContext,
+  accountActions,
+  privateNavigation = false,
 }: {
   children: React.ReactNode;
   navigation: readonly ShellNavigationItem[];
   title: string;
   review?: boolean;
   storeContext?: React.ReactNode;
+  sidebarStoreContext?: React.ReactNode;
+  accountActions?: React.ReactNode;
+  privateNavigation?: boolean;
 }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -50,15 +56,19 @@ export function AppShell({
       <div className="flex h-topbar items-center px-5">
         <Brand />
       </div>
-      <div className="mx-3 mb-5 flex items-center gap-2.5 rounded-md border border-border bg-surface/70 p-3">
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-sm border border-border bg-surface">
-          <Store size={16} aria-hidden="true" />
-        </span>
-        <div className="min-w-0">
-          <p className="text-[13px] font-medium">Merchant workspace</p>
-          <p className="text-xs text-text-muted">No store selected</p>
+      {sidebarStoreContext ? (
+        <div className="mx-3 mb-5 min-w-0">{sidebarStoreContext}</div>
+      ) : (
+        <div className="mx-3 mb-5 flex items-center gap-2.5 rounded-md border border-border bg-surface/70 p-3">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-sm border border-border bg-surface">
+            <Store size={16} aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-[13px] font-medium">Merchant workspace</p>
+            <p className="text-xs text-text-muted">No store selected</p>
+          </div>
         </div>
-      </div>
+      )}
       <nav aria-label="Main navigation" className="space-y-1 px-3">
         {navigation.map((item) => {
           const Icon = icons[item.icon];
@@ -108,8 +118,14 @@ export function AppShell({
                 </button>
               </Dialog.Trigger>
               <Dialog.Portal>
-                <Dialog.Overlay className="fixed inset-0 z-40 bg-text/30" />
-                <Dialog.Content className="fixed inset-y-0 start-0 z-50 flex w-72 max-w-[85vw] flex-col bg-background">
+                <Dialog.Overlay
+                  data-merchant-private-overlay={privateNavigation ? "" : undefined}
+                  className="fixed inset-0 z-40 bg-text/30"
+                />
+                <Dialog.Content
+                  data-merchant-private-overlay={privateNavigation ? "" : undefined}
+                  className="fixed inset-y-0 start-0 z-50 flex w-72 max-w-[85vw] flex-col bg-background"
+                >
                   <Dialog.Title className="sr-only">Navigation</Dialog.Title>
                   <Dialog.Description className="sr-only">
                     Navigate the Qafilah workspace.
@@ -134,13 +150,16 @@ export function AppShell({
             />
             <span className="truncate text-[13px] font-medium">{title}</span>
           </div>
-          <div className="min-w-0 max-w-[50%] [overflow-wrap:anywhere]">
-            {storeContext ?? (
-              <span className="flex items-center gap-2 text-xs text-text-muted">
-                <span className="size-1.5 shrink-0 rounded-full bg-text-muted" />
-                <span className="min-w-0">No store connected</span>
-              </span>
-            )}
+          <div className="flex min-w-0 max-w-[60%] items-center gap-2 [overflow-wrap:anywhere]">
+            <div className="min-w-0">
+              {storeContext ?? (
+                <span className="flex items-center gap-2 text-xs text-text-muted">
+                  <span className="size-1.5 shrink-0 rounded-full bg-text-muted" />
+                  <span className="min-w-0">No store connected</span>
+                </span>
+              )}
+            </div>
+            {accountActions}
           </div>
         </header>
         {review && (

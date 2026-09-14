@@ -341,7 +341,10 @@ describe("session rendering boundary", () => {
     fixture.purged();
     expect(screen.getByRole("status")).toHaveTextContent("Signing out");
     await act(async () => first.reject(new ApiError("network", { mutationOutcome: "unknown" })));
-    expect(screen.getByRole("heading", { name: "Sign-out could not be confirmed" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Sign-out could not be confirmed", level: 1 }),
+    ).toBeVisible();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(screen.getByRole("alert")).toHaveTextContent("server may still have an active session");
     expect(screen.getByRole("alert")).toHaveTextContent("before leaving a shared device");
     expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
@@ -416,7 +419,9 @@ describe("session rendering boundary", () => {
       session?.auth.handleApiError(new ApiError("forbidden"));
     });
     expect(screen.queryByText("Private workspace")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Access is no longer available" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Access is no longer available", level: 1 }),
+    ).toBeVisible();
   });
   it.each(["unauthenticated", "session-expired"] as const)(
     "hides private children and redirects once on %s",

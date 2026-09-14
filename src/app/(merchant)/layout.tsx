@@ -1,7 +1,7 @@
-import { SessionBoundary } from "@/features/auth/components/session-boundary";
+import { MerchantBoundary } from "@/features/auth/components/merchant-boundary";
 
 export const dynamic = "force-dynamic";
 
 export default function MerchantLayout({ children }: { children: React.ReactNode }) {
-  return <SessionBoundary>{children}</SessionBoundary>;
+  return <MerchantBoundary>{children}</MerchantBoundary>;
 }

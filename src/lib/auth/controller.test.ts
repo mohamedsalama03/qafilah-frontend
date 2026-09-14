@@ -4,6 +4,94 @@ import { createAuthController } from "./controller";
 import { safeReturnPath } from "./return-path";
 
 describe("deterministic authentication authority", () => {
+  it("refreshes minimized metadata for the same principal without revoking mounted authority", async () => {
+    const purge = vi.fn();
+    const loadIdentity = vi
+      .fn()
+      .mockResolvedValueOnce({
+        principalId: "principal-a",
+        displayName: "Before",
+        emailVerified: false,
+      })
+      .mockResolvedValueOnce({
+        principalId: "principal-a",
+        displayName: "After",
+        emailVerified: true,
+      });
+    const controller = createAuthController({
+      onAuthorityLost: purge,
+      adapter: { loadIdentity, logout: async () => {} },
+    });
+    await controller.bootstrap();
+    await controller.bootstrap();
+    expect(controller.getSnapshot()).toEqual({
+      status: "authenticated",
+      principal: {
+        principalId: "principal-a",
+        displayName: "After",
+        emailVerified: true,
+      },
+    });
+    expect(purge).not.toHaveBeenCalled();
+  });
+  it("retains stable principal metadata references when nothing changed", async () => {
+    const controller = createAuthController({
+      adapter: {
+        loadIdentity: async () => ({
+          principalId: "principal-a",
+          displayName: "Merchant",
+          emailVerified: true,
+        }),
+        logout: async () => {},
+      },
+    });
+    await controller.bootstrap();
+    const previous = controller.getSnapshot();
+    await controller.bootstrap();
+    const current = controller.getSnapshot();
+    if (previous.status !== "authenticated" || current.status !== "authenticated")
+      throw new Error("Expected authority");
+    expect(current.principal).toBe(previous.principal);
+  });
+  it("distinguishes initial anonymous identity from an expired mounted session", async () => {
+    const loadIdentity = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ principalId: "principal-a" })
+      .mockResolvedValueOnce(null);
+    const purge = vi.fn();
+    const controller = createAuthController({
+      onAuthorityLost: purge,
+      adapter: { loadIdentity, logout: async () => {} },
+    });
+    await controller.bootstrap();
+    expect(controller.getSnapshot()).toEqual({
+      status: "unauthenticated",
+      reason: "not-signed-in",
+    });
+    await controller.bootstrap();
+    await controller.bootstrap();
+    expect(controller.getSnapshot()).toEqual({ status: "unauthenticated", reason: "expired" });
+    expect(purge).toHaveBeenCalledTimes(2);
+  });
+  it("rejects unsafe identity metadata instead of retaining previous private authority", async () => {
+    const purge = vi.fn();
+    const loadIdentity = vi
+      .fn()
+      .mockResolvedValueOnce({ principalId: "principal-a" })
+      .mockResolvedValueOnce({ principalId: "principal-a", displayName: "Unsafe\nname" });
+    const controller = createAuthController({
+      onAuthorityLost: purge,
+      adapter: { loadIdentity, logout: async () => {} },
+    });
+    await controller.bootstrap();
+    await controller.bootstrap();
+    expect(controller.getSnapshot()).toMatchObject({
+      status: "error",
+      error: { kind: "invalid-response" },
+    });
+    expect(purge).toHaveBeenCalledTimes(1);
+  });
   it("remains unavailable without a reviewed adapter and never creates fake identity", async () => {
     const controller = createAuthController();
     expect(controller.getSnapshot()).toEqual({ status: "unavailable" });

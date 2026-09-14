@@ -38,6 +38,11 @@ export interface ApiClientOptions {
   mode?: "production" | "development" | "test";
   csrf?: CsrfContract;
   requestId?: { evidence: ContractEvidence; headerName: string };
+  /** A reviewed body field can remain readable when CORS exposes no response headers. */
+  requestIdFromBody?: {
+    evidence: ContractEvidence;
+    decode: (payload: unknown) => string | undefined;
+  };
   retryAfter?: { evidence: ContractEvidence; headerName: string };
   timeoutMs?: number;
   fetch?: typeof globalThis.fetch;

@@ -1,10 +1,13 @@
 import { abortable } from "../api/cancellation";
 import { ApiError, normalizeUnexpectedError } from "../api/errors";
 import { parsePrincipalId, type PrincipalId } from "../query/keys";
+import { hasAsciiControlCharacters } from "../api/control-characters";
 
-/** Internal view of identity. An eventual adapter maps a reviewed DTO into this shape. */
+/** Minimized identity metadata; only principalId determines cache isolation. */
 export interface AuthPrincipal {
   readonly principalId: PrincipalId;
+  readonly displayName?: string;
+  readonly emailVerified?: boolean;
 }
 
 export type AuthState =
@@ -26,7 +29,11 @@ export type AuthState =
 
 export interface AuthAdapter {
   /** All implementations must call reviewed contracts through the central transport. */
-  loadIdentity: (signal: AbortSignal) => Promise<{ principalId: unknown } | null>;
+  loadIdentity: (signal: AbortSignal) => Promise<{
+    principalId: unknown;
+    displayName?: string;
+    emailVerified?: boolean;
+  } | null>;
   logout: (signal: AbortSignal) => Promise<void>;
 }
 
@@ -100,9 +107,35 @@ export function createAuthController(options: AuthControllerOptions = {}) {
           );
           if (ticket !== generation) return;
           let principalId: PrincipalId | undefined;
+          let principal: AuthPrincipal | undefined;
           if (identity) {
             try {
               principalId = parsePrincipalId(identity.principalId);
+              if (
+                (identity.displayName !== undefined &&
+                  (typeof identity.displayName !== "string" ||
+                    !identity.displayName.trim() ||
+                    identity.displayName.length > 255 ||
+                    hasAsciiControlCharacters(identity.displayName))) ||
+                (identity.emailVerified !== undefined &&
+                  typeof identity.emailVerified !== "boolean")
+              )
+                throw new ApiError("invalid-response");
+              const nextPrincipal = Object.freeze({
+                principalId,
+                ...(identity.displayName === undefined
+                  ? {}
+                  : { displayName: identity.displayName }),
+                ...(identity.emailVerified === undefined
+                  ? {}
+                  : { emailVerified: identity.emailVerified }),
+              });
+              principal =
+                previous?.principal.principalId === principalId &&
+                previous.principal.displayName === nextPrincipal.displayName &&
+                previous.principal.emailVerified === nextPrincipal.emailVerified
+                  ? previous.principal
+                  : nextPrincipal;
             } catch {
               throw new ApiError("invalid-response");
             }
@@ -110,15 +143,12 @@ export function createAuthController(options: AuthControllerOptions = {}) {
           if (!principalId || (previous && principalId !== previous.principal.principalId))
             revoke();
           update(
-            principalId
+            principal
               ? {
                   status: "authenticated",
-                  principal:
-                    previous?.principal.principalId === principalId
-                      ? previous.principal
-                      : Object.freeze({ principalId }),
+                  principal,
                 }
-              : { status: "unauthenticated", reason: "not-signed-in" },
+              : { status: "unauthenticated", reason: previous ? "expired" : "not-signed-in" },
           );
         } catch (error) {
           if (ticket !== generation) return;

@@ -58,6 +58,7 @@ export function createApiClient(options: ApiClientOptions) {
       validateHeader(header.headerName);
     }
   }
+  if (options.requestIdFromBody) requireEvidence(options.requestIdFromBody.evidence);
 
   return {
     async request<Input, Output>(
@@ -117,7 +118,7 @@ export function createApiClient(options: ApiClientOptions) {
           }),
           controller.signal,
         );
-        const requestId = options.requestId
+        let requestId = options.requestId
           ? (response.headers.get(options.requestId.headerName) ?? undefined)
           : undefined;
         let payload: unknown = undefined;
@@ -142,6 +143,13 @@ export function createApiClient(options: ApiClientOptions) {
             requestId,
             mutationOutcome: mutation ? "unknown" : "not-applicable",
           });
+        }
+        if (options.requestIdFromBody) {
+          try {
+            requestId = options.requestIdFromBody.decode(payload) ?? requestId;
+          } catch {
+            // Malformed diagnostics never turn an error body into displayable server text.
+          }
         }
         if (!response.ok) {
           let details: SafeErrorDetails = {};

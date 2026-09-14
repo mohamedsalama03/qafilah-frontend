@@ -2,6 +2,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
+import { backendBaseline, merchantContracts } from "../src/lib/backend/contracts";
 import {
   inspectArchitecture,
   isProductionSource,
@@ -29,6 +30,121 @@ describe("permanent executable architecture boundaries", () => {
   });
 
   const mutants: Array<[string, ArchitectureRule, string, string?]> = [
+    [
+      "contract copy overrides a reviewed path",
+      "verified-contract-registry",
+      'const endpoint = { ...merchantContracts.identity, path: () => "/api/v1/invented" };',
+      "src/lib/backend/extra.ts",
+    ],
+    [
+      "UUID arrow function authorizes",
+      "uuid-derived-authority",
+      "const canAccessStore = (storeUuid: string) => !!storeUuid;",
+    ],
+    [
+      "endpoint definition outside reviewed registry",
+      "verified-contract-registry",
+      'const endpoint = { method: "GET", path: () => "/api/v1/me", decode: value => value };',
+      "src/lib/backend/extra.ts",
+    ],
+    [
+      "owner-only Store discovery substituted for Merchant membership discovery",
+      "verified-contract-registry",
+      'export const merchantContracts = { stores: { method: "GET", path: () => "/api/v1/stores" } };',
+      "src/lib/backend/contracts.ts",
+    ],
+    [
+      "invented endpoint disguised by trusted evidence",
+      "verified-contract-registry",
+      'export const merchantContracts = { identity: { evidence: {source:"certified"}, method: "GET", path: () => "/api/v1/invented-me" } };',
+      "src/lib/backend/contracts.ts",
+    ],
+    [
+      "extra Platform endpoint in registered source",
+      "verified-contract-registry",
+      'export const merchantContracts = { directory: { method: "GET", path: () => "/api/v1/platform/stores" } };',
+      "src/lib/backend/contracts.ts",
+    ],
+    [
+      "membership admin inference endpoint",
+      "verified-contract-registry",
+      'export const merchantContracts = { stores: { method: "GET", path: () => "/api/v1/store-memberships" } };',
+      "src/lib/backend/contracts.ts",
+    ],
+    [
+      "permission catalog inference endpoint",
+      "verified-contract-registry",
+      'export const merchantContracts = { context: { method: "GET", path: id => `/api/v1/stores/${id}/permissions` } };',
+      "src/lib/backend/contracts.ts",
+    ],
+    [
+      "domain feature endpoint outside F2",
+      "verified-contract-registry",
+      'export const merchantContracts = { context: { method: "GET", path: id => `/api/v1/stores/${id}/catalog/products` } };',
+      "src/lib/backend/contracts.ts",
+    ],
+    [
+      "unreviewed method change",
+      "verified-contract-registry",
+      'export const merchantContracts = { identity: { method: "POST", path: () => "/api/v1/me" } };',
+      "src/lib/backend/contracts.ts",
+    ],
+    [
+      "unreviewable dynamic endpoint path",
+      "verified-contract-registry",
+      'export const merchantContracts = { identity: { method: "GET", path: () => process.env.ENDPOINT } };',
+      "src/lib/backend/contracts.ts",
+    ],
+    [
+      "Role name capability shortcut",
+      "role-derived-authority",
+      'const canEdit = context.role.name === "Owner";',
+    ],
+    [
+      "Role kind wildcard",
+      "role-derived-authority",
+      'const grants = role.kind === "owner" ? ["*"] : context.permissions;',
+    ],
+    [
+      "Role name alias",
+      "role-derived-authority",
+      'const currentRole = context.role; if (currentRole.name === "Administrator") enableWrites();',
+    ],
+    [
+      "destructured Role name inference",
+      "role-derived-authority",
+      'const { name: roleName } = context.role; const canEdit = roleName === "Owner";',
+    ],
+    [
+      "normalized Role name inference",
+      "role-derived-authority",
+      'const canEdit = context.role.name.toLowerCase() === "owner";',
+    ],
+    [
+      "Role allowlist inference",
+      "role-derived-authority",
+      'const canEdit = ["Owner", "Manager"].includes(context.role.name);',
+    ],
+    [
+      "UUID presence grants access",
+      "uuid-derived-authority",
+      "const canAccessStore = !!storeUuid;",
+    ],
+    [
+      "UUID boolean alias grants access",
+      "uuid-derived-authority",
+      "const requested = route.storeUuid; const authorized = Boolean(requested);",
+    ],
+    [
+      "UUID presence authorization result",
+      "uuid-derived-authority",
+      "const decision = { allowed: !!store.id };",
+    ],
+    [
+      "UUID function authorizes",
+      "uuid-derived-authority",
+      "function canAccessStore(storeUuid) { return !!storeUuid; }",
+    ],
     ["localStorage token write", "browser-persistence", 'localStorage.setItem("token", token);'],
     [
       "sessionStorage write",
@@ -233,6 +349,12 @@ describe("permanent executable architecture boundaries", () => {
       const headerExample = 'const headers = new Headers(); headers.append("AUTHORIZATION", "Bearer " + token)';
       const headers = new Headers({ Accept: "application/json" });
       headers.set("X-Request-ID", "synthetic");
+      // const canEdit = role.name === "Owner";
+      const roleExample = 'const canAccessStore = !!storeUuid;';
+      const endpointExample = '{method:"GET",path:()=>"/api/v1/platform/stores"}';
+      const roleLabel = <span>{context.role.name}</span>;
+      const hasPermission = context.permissions.includes("orders.view");
+      const requestedUuid = parseStoreUuid(params.storeUuid);
     `;
     expect(inspectArchitecture(merchantFile, source)).toEqual([]);
   });
@@ -291,6 +413,47 @@ describe("permanent executable architecture boundaries", () => {
     expect(mutant).not.toBe(source);
     expect(inspectArchitecture(file, mutant).map((violation) => violation.rule)).toContain(
       "token-authentication",
+    );
+  });
+
+  it("activates exactly the six published F2 method/path contracts", () => {
+    const uuid = "15913d0d-10a1-40ed-bc6f-3e491f81a56f";
+    expect(backendBaseline).toBe("6614690a3b24b39f45c7c1b9ed85c20ecb22cbbf");
+    expect(Object.keys(merchantContracts).sort()).toEqual([
+      "context",
+      "csrf",
+      "identity",
+      "login",
+      "logout",
+      "stores",
+    ]);
+    expect([
+      [merchantContracts.csrf.method, merchantContracts.csrf.path()],
+      [merchantContracts.login.method, merchantContracts.login.path()],
+      [merchantContracts.identity.method, merchantContracts.identity.path()],
+      [merchantContracts.logout.method, merchantContracts.logout.path()],
+      [merchantContracts.stores.method, merchantContracts.stores.path(2)],
+      [merchantContracts.context.method, merchantContracts.context.path(uuid)],
+    ]).toEqual([
+      ["GET", "/sanctum/csrf-cookie"],
+      ["POST", "/api/v1/auth/login"],
+      ["GET", "/api/v1/me"],
+      ["POST", "/api/v1/auth/logout"],
+      ["GET", "/api/v1/me/stores?page=2"],
+      ["GET", `/api/v1/stores/${uuid}/context`],
+    ]);
+    expect(() => merchantContracts.stores.path(0)).toThrow();
+    expect(() => merchantContracts.context.path("valid-shape-is-not-membership")).toThrow();
+  });
+
+  it("rejects an invented route mutation in the actual activated contract source", () => {
+    const file = "src/lib/backend/contracts.ts";
+    const source = readFileSync(join(root, file), "utf8");
+    expect(inspectArchitecture(file, source)).toEqual([]);
+    const mutant = source.replace('"/api/v1/me"', '"/api/v1/invented-me"');
+    expect(mutant).not.toBe(source);
+    expect(inspectArchitecture(file, mutant).map(({ rule }) => rule)).toContain(
+      "verified-contract-registry",
     );
   });
 });

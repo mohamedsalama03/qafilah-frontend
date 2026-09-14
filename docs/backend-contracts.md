@@ -1,5 +1,54 @@
 # Backend contract access and integration register
 
+## F2 published contract authority
+
+Frontend baseline: `473b44c1c0bc0627942866c31b11aac4d4c35442`. Backend source: `git@github.com:mohamedsalama03/qafila-e-commerce.git`, main at `6614690a3b24b39f45c7c1b9ed85c20ecb22cbbf`. Both were independently fetched, clean and at published parity before F2 implementation. The backend checkout is read-only.
+
+F1 had no identified backend source. Earlier F2 discovery subsequently found backend `cf09c88d`, verified authentication, and correctly stopped because general Merchant discovery/context authority was absent. The new published revision resolves that blocker. `artifacts/f2-discovery/` retains the earlier local evidence; the historical F1 register below is not the current contract count.
+
+**Source verified: six contracts. Invented: zero.** Runtime verification is recorded separately in `F2-report.md` and the real integration test evidence; source inspection alone never certifies a browser deployment.
+
+| Method and path                      | Exact input                                  | Success                                                             | Published source                                                                                                                                                  |
+| ------------------------------------ | -------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET `/sanctum/csrf-cookie`           | No body                                      | 204, empty                                                          | Sanctum 4.3.2 `SanctumServiceProvider::defineRoutes`, `CsrfCookieController::show`                                                                                |
+| POST `/api/v1/auth/login`            | JSON `email`, `password` only                | 200 User envelope                                                   | `routes/api.php`, Identity `AuthenticateUserRequest`, `AuthenticateUserAction`, `AuthenticationController`, `UserResource`                                        |
+| GET `/api/v1/me`                     | No input/body                                | 200 User envelope                                                   | `CurrentUserController`, `UserResource`, stateful/session/active middleware                                                                                       |
+| POST `/api/v1/auth/logout`           | No functional input                          | 200 status envelope, `data: []`, message `Logged out successfully.` | `LogoutUserAction`, `AuthenticationController`, `StatusResource`                                                                                                  |
+| GET `/api/v1/me/stores?page=N`       | Optional positive integer page only; no body | 200 accessible Store collection                                     | Stores `ListAccessibleMerchantStoresRequest`, `ListAccessibleMerchantStores`, `AccessibleMerchantStoreCollection`, `AccessibleMerchantStoreResource`              |
+| GET `/api/v1/stores/{store}/context` | Route public UUID only; no query/body        | 200 current Store context                                           | Stores `MerchantStoreContextRequest`, `ReadMerchantStoreContextAction`, `MerchantStoreContextResource`; `ResolveMerchantTenant`; `StorePermissionEvaluator::read` |
+
+All JSON successes use `{success:true,data,meta:{request_id},message:null}` except logout's documented message. Discovery adds `meta.pagination`. Errors use `{success:false,data:null,meta:{request_id},message,errors}`. The client retains only reviewed data and safe bounded support IDs; it never renders raw error text.
+
+### Identity, credentials and CSRF
+
+User data contains public UUID `id`, `name`, `email`, nullable `email_verified_at`, `status:"active"`, nullable `created_at` and `updated_at`. `/me` is identity authority, with no Store membership or permission projection. Active unverified users are allowed. The frontend principal retains only UUID, display name and verification boolean.
+
+Login accepts RFC email (maximum 254, trimmed/lowercased) and a nonempty password up to 4096; unknown keys are prohibited. Registration password rules are not login rules. Wrong credentials and suspended users receive uniform 422 email validation. The published limiter allows five attempts per normalized email/IP per minute before 429. No consumed authentication contract documents 409.
+
+Sanctum SPA authentication uses an HttpOnly Laravel session cookie. The client bootstraps `/sanctum/csrf-cookie`, reads only `XSRF-TOKEN`, URL-decodes its current wire value, and sends `X-XSRF-TOKEN` for mutations. Session cookie values are never read by frontend code. Credentials use `include`; there is no Bearer/JWT or browser auth persistence. Laravel 13 accepts valid same-origin Fetch Metadata independently of a token; same-site cross-origin SPA mutations require the CSRF proof. A missing-header test must therefore use the actual cross-origin topology.
+
+Logout audits before guard logout/session invalidation/token regeneration. A failed audit deliberately leaves the remote session alive. The F1 explicit failed-logout latch therefore remains necessary. A lost response is not proof of termination, and credential mutations are not blindly replayed.
+
+### Discovery and current Store authority
+
+Discovery items are exactly `{id,name,status:"active"}`. Public UUIDs are navigation identifiers. Eligibility requires current active identity, active Store, active explicit membership, and an active Role from the same Store. Owners and nonowners follow explicit membership authority. Owner-only `/api/v1/stores`, membership administration, Role administration, the permission catalog and Platform APIs are not consumed.
+
+Pagination is `current_page`, `per_page:20`, `last_page`, `total`; order is `created_at DESC, id DESC`. Zero eligible Stores returns 200 with `data:[]`, total 0, last page 1. Draft/suspended owned Stores are excluded, so zero is not evidence of no ownership. Each page is a fresh database snapshot, not a stable multi-page cursor. The client consumes all advertised pages, deduplicates UUIDs and rejects inconsistent/unbounded pagination rather than silently truncating. It performs no context request per list item.
+
+Context data is `{store:{id,name,status:"active"},membership:{id,status:"active"},role:{id,name},permissions:string[]}`. IDs are public UUIDs. Permissions are sorted canonical active explicit grants; zero grants is a valid success. Role name and owner labels never imply capabilities. This projection controls presentation only; Laravel independently reauthorizes every operation.
+
+Context rechecks read current authority in PostgreSQL repeatable-read read-only transactions. Removed permissions return updated grants, a replaced Role returns its current projection, and stale ineligible membership/Role/Store returns safe 403. Foreign, unknown and malformed Stores return 404 without disclosing Store data. An action/middleware race may deny conservatively with 403; there is no reason-code distinction to invent. Global invalid/suspended identity returns 401. Store 403/404 clears Store authority without automatically logging out the identity.
+
+### Error and deployment semantics
+
+400 is the trusted Host/security boundary; 401 is session/identity authority loss; 403 is denied existing authority; 404 is safe absence/foreign Store; 419 is CSRF/session mismatch; 422 is validation/prohibited input; 429 is rate limiting; 500 is a generic failure. Network/timeout and unparseable responses remain distinct frontend failures. No raw SQL, server path, exception or guessed reason code is exposed.
+
+The published development Compose permits exactly `http://localhost:3000` through credentialed CORS and recognizes that stateful SPA domain. `APP_URL` defaults to `http://localhost:8080`; Merchant Host validation compares its normalized host and validates the port syntax. The isolated runtime uses an owned loopback port with the same host and approved frontend origin. No CORS/Host/Origin policy, proxy, or browser bypass is added. CORS exposes no response headers, so support request IDs come from `meta.request_id`; the browser must not assume `X-Request-ID` or `Retry-After` exposure.
+
+Published sessions use Redis, encryption, HttpOnly, SameSite Lax and path `/`. The development Compose explicitly defaults Secure cookies off for HTTP. Production requires HTTPS and an appropriate Secure-cookie deployment. Local HTTP browser evidence does not certify production TLS. Missing frontend API configuration remains fail-closed. `NEXT_PUBLIC_API_ORIGIN` is public build configuration only, never a secret.
+
+## Historical F1 register (retained, superseded by the F2 inventory above)
+
 F1 inspected the supplied frontend and nearby Qafilah directory on 2026-09-13. No Laravel repository or API documentation was available in the identified Qafilah workspace. This is an access limitation; it does not establish that any backend capability is absent.
 
 ## Evidence and scope

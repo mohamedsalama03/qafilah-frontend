@@ -1,4 +1,22 @@
-# F1 source file inventory
+# Frontend source file inventory
+
+## F2 additions and changed boundaries
+
+The current F2 diff is one local child of published F1 remediation `473b44c1c0bc0627942866c31b11aac4d4c35442`. Use `git diff --name-status HEAD^ HEAD` for the exact delivered inventory. The earlier F1 inventory below is historical.
+
+| Area                     | Added files / behavior                                                                                                                                            |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Verified backend adapter | `src/lib/backend/contracts.ts`, `client.ts`, `client.test.ts`                                                                                                     |
+| Store lifecycle          | `src/lib/stores/controller.ts`, `controller.test.ts`; scoped cleanup extension in `lib/query/scope.ts`                                                            |
+| Authentication UI        | `features/auth/components/login-form.tsx`, `login-form.test.tsx`, `login-destination.ts`, `merchant-api-provider.tsx`, `merchant-boundary.tsx`, `user-menu.tsx`   |
+| Store UI                 | `features/stores/components/store-provider.tsx`, `store-selection.tsx`, `store-list.tsx`, `store-switcher.tsx`, `store-workspace.tsx`, `store-workspace.test.tsx` |
+| Store route              | `src/app/(merchant)/stores/[storeUuid]/page.tsx`                                                                                                                  |
+| Integration tests        | `playwright.integration.config.ts`, `tests/integration/merchant.spec.ts`, `tests/integration/laravel-fixtures.php`                                                |
+| Documentation            | `docs/F2-plan.md`, `F2-integration.md`, `F2-report.md`; updates to README, public environment example, architecture, contract register and this inventory         |
+
+Existing root/merchant/login composition, AppShell, SessionBoundary, ErrorState, transport/auth types and tests, and executable architecture policies are extended. No package/lockfile or Dockerfile change is required. Generated runtime services, source snapshots, secrets, builds, test results and screenshots are ignored and excluded from the commit and production image.
+
+## Historical F1 inventory
 
 Frontend root: `D:\customers\qafilah\dashboard frontend`. This inventory covers the 108 source, configuration, lockfile, test and documentation files after focused F1 remediation. The initially empty directory was subsequently versioned and its immutable F1 baseline published as `ed71b2b0ee6db46cb5e358b079715e5c419170b0`. See the [focused remediation report](F1-remediation-report.md) for the authorized local child diff and current verification. Generated dependencies, build outputs, local screenshots and test evidence are excluded by `.gitignore`.
 

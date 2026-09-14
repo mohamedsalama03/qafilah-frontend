@@ -11,11 +11,19 @@ import { ConnectionUnavailable } from "./connection-unavailable";
 import { ErrorState } from "@/components/ui/error-state";
 import { Button } from "@/components/ui/button";
 import type { ApiError } from "@/lib/api/errors";
+import { loginDestination } from "./login-destination";
 
 function createSession(adapter?: AuthAdapter) {
   const queryClient = createQueryClient();
   const scope = createScopeController(queryClient);
-  const controller = createAuthController({ adapter, onAuthorityLost: () => scope.clear() });
+  const authorityListeners = new Set<() => void>();
+  const controller = createAuthController({
+    adapter,
+    onAuthorityLost: () => {
+      authorityListeners.forEach((listener) => listener());
+      scope.clear();
+    },
+  });
   const serverSnapshot = controller.getSnapshot();
   let publishInvalidation: (() => void) | undefined;
   const auth = {
@@ -34,13 +42,22 @@ function createSession(adapter?: AuthAdapter) {
     queryClient,
     scope,
     auth,
+    onAuthorityLost: (listener: () => void) => {
+      authorityListeners.add(listener);
+      return () => {
+        authorityListeners.delete(listener);
+      };
+    },
     getServerSnapshot: () => serverSnapshot,
     setInvalidationPublisher: (publish?: () => void) => {
       publishInvalidation = publish;
     },
   };
 }
-type MerchantSession = Pick<ReturnType<typeof createSession>, "queryClient" | "scope" | "auth">;
+type MerchantSession = Pick<
+  ReturnType<typeof createSession>,
+  "queryClient" | "scope" | "auth" | "onAuthorityLost"
+>;
 const SessionContext = createContext<MerchantSession | null>(null);
 
 export function useMerchantSession() {
@@ -49,13 +66,15 @@ export function useMerchantSession() {
   return value;
 }
 
-/** No adapter is registered in F1; only reviewed Laravel contracts may supply one. */
+/** The adapter supplies reviewed Laravel authority; missing configuration remains closed. */
 export function SessionBoundary({
   children,
   adapter,
+  returnTo,
 }: {
   children: React.ReactNode;
   adapter?: AuthAdapter;
+  returnTo?: string;
 }) {
   // A replacement adapter must never inherit the previous session's identity or cache.
   const session = useMemo(() => createSession(adapter), [adapter]);
@@ -72,6 +91,14 @@ export function SessionBoundary({
     const hide = () => {
       // Hide synchronously before the browser can capture a page-history snapshot.
       if (privateContent.current) privateContent.current.hidden = true;
+      // Radix overlays live outside the private subtree; only explicitly owned Merchant portals
+      // participate in this boundary. Hide them in the same pre-snapshot event turn.
+      document
+        .querySelectorAll<HTMLElement>("[data-merchant-private-overlay]")
+        .forEach((element) => {
+          element.hidden = true;
+          element.style.setProperty("display", "none", "important");
+        });
     };
     const suspend = () => {
       hide();
@@ -116,14 +143,22 @@ export function SessionBoundary({
   }, [session]);
 
   useEffect(() => {
-    if (state.status === "unauthenticated") router.replace("/login");
-  }, [state.status, router]);
+    if (state.status !== "unauthenticated") return;
+    if (!returnTo || state.reason === "signed-out") {
+      router.replace("/login");
+      return;
+    }
+    const search = new URLSearchParams({ returnTo: loginDestination(returnTo) });
+    if (state.reason === "expired") search.set("reason", "expired");
+    router.replace(`/login?${search.toString()}`);
+  }, [state, router, returnTo]);
 
   if (state.status === "unavailable") return <ConnectionUnavailable />;
   if (state.status === "logout-failed")
     return (
       <main className="mx-auto max-w-xl px-6 py-24">
         <ErrorState
+          headingLevel={1}
           title="Sign-out could not be confirmed"
           description="This dashboard has been cleared locally, but the server may still have an active session. Retry sign-out before leaving a shared device."
           requestId={state.error.requestId}
@@ -137,6 +172,7 @@ export function SessionBoundary({
     return (
       <main className="mx-auto max-w-xl px-6 py-24">
         <ErrorState
+          headingLevel={1}
           title={
             state.error.kind === "forbidden"
               ? "Access is no longer available"

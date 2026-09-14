@@ -108,6 +108,31 @@ describe("credentialed transport boundary", () => {
 });
 
 describe("safe response normalization", () => {
+  it("requires evidence before reading request diagnostics from JSON", () => {
+    expect(() =>
+      createApiClient({
+        apiOrigin: origin,
+        requestIdFromBody: { evidence: { source: "" }, decode: () => "not-reviewed" },
+      }),
+    ).toThrow(ApiError);
+  });
+  it("does not let an unsafe or throwing diagnostic decoder leak response text", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json({ private: "secret" }, 500));
+    const api = createApiClient({
+      apiOrigin: origin,
+      fetch: fetcher,
+      requestIdFromBody: {
+        evidence,
+        decode: () => {
+          throw new Error("SQLSTATE private");
+        },
+      },
+    });
+    await expect(api.request(endpoint(), undefined)).rejects.toMatchObject({
+      kind: "server",
+      requestId: undefined,
+    });
+  });
   it.each([
     [401, "unauthenticated"],
     [403, "forbidden"],
