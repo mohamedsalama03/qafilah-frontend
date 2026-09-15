@@ -40,7 +40,7 @@ Discovery comes only from `/me/stores` and includes active explicit nonowner mem
 
 ## Store Pagination
 
-The client consumed page 1 with 20 Stores and page 2 with 3. It deduplicates overlapping UUIDs, validates the paginator and rejects inconsistent/runaway results instead of returning a silently truncated list. The defensive ceiling is 1000 pages. Each backend page is a fresh snapshot; concurrent membership changes can require a retry rather than providing stable cursor semantics.
+The original F2 integration consumed page 1 with 20 Stores and page 2 with 3. Agent 2 subsequently reproduced A2-F2-L1: individual-page validation and silent UUID deduplication could accept cross-page drift and publish a mixed/incomplete navigation list. The focused remediation pins metadata per traversal, rejects duplicate UUIDs and conflicting canonical metadata, checks final unique completeness, and discards an inconsistent attempt before one full reconstruction retry. A second inconsistency fails explicitly; a failed background refresh retains the previously verified list with an error state. The defensive ceiling remains 1000 pages. Each backend page has an independent snapshot, so apparently consistent concurrent changes can remain undetectable; no stable multi-page snapshot is claimed. Selected Store context and backend operation authorization remain unchanged. Focused tests, mutation proof and rerun evidence are recorded separately in `F2-remediation-report.md`.
 
 ## Zero / One / Multiple Stores
 
@@ -90,7 +90,7 @@ Real login and switcher checks passed axe; long valid 120-character unbroken Sto
 
 ## Performance / Request Counts
 
-The recorded initial multi-Store sequence is 8 requests: anonymous `/me`; CSRF; login POST; post-login identity confirmation; protected-boundary identity bootstrap; two discovery pages; one selected context. The two post-login identity reads are separate confirmation/boundary stages, not concurrent shell-component duplication. Focus revalidation for 23 Stores is 4 requests: one identity, one selected context and two discovery pages. A-to-B switch is 1 destination context request. Normal logout is 2 requests; already-ended 401 confirmation can add 1. Concurrent calls deduplicate, no auto retries are enabled, and no request-per-Store fanout occurs.
+The recorded initial multi-Store sequence is 8 requests: anonymous `/me`; CSRF; login POST; post-login identity confirmation; protected-boundary identity bootstrap; two discovery pages; one selected context. The two post-login identity reads are separate confirmation/boundary stages, not concurrent shell-component duplication. Focus revalidation for 23 Stores is 4 requests: one identity, one selected context and two discovery pages. A-to-B switch is 1 destination context request. Normal logout is 2 requests; already-ended 401 confirmation can add 1. Concurrent calls deduplicate and no request-per-Store fanout occurs. The original candidate had no automatic retries; A2-F2-L1 adds exactly one full discovery reconstruction for observable pagination inconsistency, with zero extra healthy-path requests. Generic transport/parser failures and mutations remain without automatic retries.
 
 ## Architecture / Mutation Evidence
 

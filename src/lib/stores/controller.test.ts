@@ -101,7 +101,7 @@ describe("principal-owned Merchant Store lifecycle", () => {
     controller.dispose();
   });
 
-  it("deduplicates offset-page overlap without changing backend order", async () => {
+  it("rejects repeated offset-page overlap instead of publishing an incomplete deduplicated list", async () => {
     const stores = Array.from({ length: 20 }, (_, index) =>
       store(`10000000-0000-4000-8000-${String(index).padStart(12, "0")}`),
     );
@@ -110,10 +110,11 @@ describe("principal-owned Merchant Store lifecycle", () => {
         page(number === 1 ? stores : [stores[19], store(storeB)], number, 22),
     });
     await controller.discover();
-    expect(controller.getSnapshot().stores.map(({ id }) => id)).toEqual([
-      ...stores.map(({ id }) => id),
-      storeB,
-    ]);
+    expect(controller.getSnapshot()).toMatchObject({
+      stores: [],
+      discoveryStatus: "error",
+      discoveryError: { kind: "invalid-response" },
+    });
     controller.dispose();
   });
 

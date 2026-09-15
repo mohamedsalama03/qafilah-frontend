@@ -40,6 +40,14 @@ export interface StoreControllerOptions {
 const emptyStores: readonly AccessibleStore[] = Object.freeze([]);
 // A corrupt or ever-growing paginator must fail explicitly, never return a truncated list.
 const maximumDiscoveryPages = 1_000;
+const maximumDiscoveryAttempts = 2;
+
+/** Successful pages disagree; this is distinct from a transport or parser failure. */
+class DiscoveryInconsistency extends ApiError {
+  constructor() {
+    super("invalid-response");
+  }
+}
 
 function initialState(): StoreState {
   return Object.freeze({
@@ -122,55 +130,105 @@ export function createStoreController(options: StoreControllerOptions) {
     options.onSessionError?.(error);
   }
 
+  async function discoverAttempt(
+    signal: AbortSignal,
+    assertCurrent: () => void,
+  ): Promise<readonly AccessibleStore[]> {
+    // Each attempt owns its paginator and aggregate. Nothing is published until complete.
+    const stores = new Map<string, AccessibleStore>();
+    let pinned: StorePage["pagination"] | null = null;
+    for (let page = 1; page <= (pinned?.last_page ?? 1); page += 1) {
+      assertCurrent();
+      const result = await abortable(
+        Promise.resolve().then(() => {
+          assertCurrent();
+          return options.api.listStoresPage(page, signal);
+        }),
+        signal,
+      );
+      assertCurrent();
+      const pagination = result.pagination;
+      if (
+        !Number.isSafeInteger(pagination.current_page) ||
+        pagination.current_page < 1 ||
+        !Number.isSafeInteger(pagination.per_page) ||
+        pagination.per_page < 1 ||
+        !Number.isSafeInteger(pagination.last_page) ||
+        pagination.last_page < 1 ||
+        !Number.isSafeInteger(pagination.total) ||
+        pagination.total < 0
+      )
+        throw new ApiError("invalid-response");
+      if (
+        pagination.current_page !== page ||
+        (pinned &&
+          (pagination.total !== pinned.total ||
+            pagination.last_page !== pinned.last_page ||
+            pagination.per_page !== pinned.per_page))
+      )
+        throw new DiscoveryInconsistency();
+      // Reject an oversized first-page paginator before following it, without allocating by total.
+      if (pagination.last_page > maximumDiscoveryPages) throw new ApiError("invalid-response");
+      if (
+        pagination.per_page !== 20 ||
+        pagination.last_page !== Math.max(1, Math.ceil(pagination.total / pagination.per_page))
+      )
+        throw new ApiError("invalid-response");
+      if (
+        result.stores.length !==
+        Math.max(
+          0,
+          Math.min(pagination.per_page, pagination.total - (page - 1) * pagination.per_page),
+        )
+      )
+        throw new DiscoveryInconsistency();
+      pinned ??= { ...pagination };
+      for (const store of result.stores) {
+        let id: StoreUuid;
+        try {
+          id = parseStoreUuid(store.id.toLowerCase());
+        } catch {
+          throw new ApiError("invalid-response");
+        }
+        const previous = stores.get(id);
+        if (previous && (previous.name !== store.name || previous.status !== store.status))
+          throw new DiscoveryInconsistency();
+        // Even identical overlap can displace another Store across independently read pages.
+        if (previous) throw new DiscoveryInconsistency();
+        if (store.status !== "active") throw new ApiError("invalid-response");
+        stores.set(id, Object.freeze({ ...store, id }));
+      }
+    }
+    if (!pinned || stores.size !== pinned.total) throw new DiscoveryInconsistency();
+    return Object.freeze([...stores.values()]);
+  }
+
   function discover(): Promise<void> {
     if (stopped) return Promise.resolve();
     if (pendingDiscovery) return pendingDiscovery;
     const ticket = ++discoveryGeneration;
     const controller = new AbortController();
     discoveryAbort = controller;
+    const assertCurrent = () => {
+      if (stopped || ticket !== discoveryGeneration || controller.signal.aborted)
+        throw new ApiError("cancelled");
+    };
     const task = Promise.resolve().then(async () => {
       try {
-        if (stopped || ticket !== discoveryGeneration) return;
-        const stores = new Map<string, AccessibleStore>();
-        let lastPage = 1;
-        for (let page = 1; page <= lastPage; page += 1) {
-          const result = await abortable(
-            Promise.resolve().then(() => {
-              if (controller.signal.aborted) throw new ApiError("cancelled");
-              return options.api.listStoresPage(page, controller.signal);
-            }),
-            controller.signal,
-          );
-          if (stopped || ticket !== discoveryGeneration) return;
-          const pagination = result.pagination;
-          if (
-            pagination.current_page !== page ||
-            pagination.per_page !== 20 ||
-            !Number.isSafeInteger(pagination.last_page) ||
-            pagination.last_page < 1 ||
-            pagination.last_page > maximumDiscoveryPages ||
-            !Number.isSafeInteger(pagination.total) ||
-            pagination.total < 0 ||
-            pagination.last_page !== Math.max(1, Math.ceil(pagination.total / 20)) ||
-            result.stores.length !== Math.max(0, Math.min(20, pagination.total - (page - 1) * 20))
-          )
-            throw new ApiError("invalid-response");
-          lastPage = Math.max(lastPage, pagination.last_page);
-          for (const store of result.stores) {
-            let id: StoreUuid;
-            try {
-              id = parseStoreUuid(store.id.toLowerCase());
-            } catch {
-              throw new ApiError("invalid-response");
-            }
-            if (store.status !== "active") throw new ApiError("invalid-response");
-            // Offset pages can overlap while membership changes. Keep the first ordered item.
-            if (!stores.has(id)) stores.set(id, Object.freeze({ ...store, id }));
+        for (let attempt = 1; attempt <= maximumDiscoveryAttempts; attempt += 1) {
+          assertCurrent();
+          try {
+            const result = await discoverAttempt(controller.signal, assertCurrent);
+            assertCurrent();
+            options.queryClient.setQueryData(discoveryKey, result);
+            update({ ...state, stores: result, discoveryStatus: "ready", discoveryError: null });
+            return;
+          } catch (error) {
+            assertCurrent();
+            if (!(error instanceof DiscoveryInconsistency) || attempt === maximumDiscoveryAttempts)
+              throw error;
           }
         }
-        const result = Object.freeze([...stores.values()]);
-        options.queryClient.setQueryData(discoveryKey, result);
-        update({ ...state, stores: result, discoveryStatus: "ready", discoveryError: null });
       } catch (error) {
         if (stopped || ticket !== discoveryGeneration) return;
         const normalized = normalizeUnexpectedError(error);
@@ -178,10 +236,11 @@ export function createStoreController(options: StoreControllerOptions) {
           loseSession(normalized);
           return;
         }
-        if (!isTransient(normalized)) options.queryClient.removeQueries({ queryKey: discoveryKey });
+        const retainVerified = isTransient(normalized) || error instanceof DiscoveryInconsistency;
+        if (!retainVerified) options.queryClient.removeQueries({ queryKey: discoveryKey });
         update({
           ...state,
-          stores: isTransient(normalized) ? state.stores : emptyStores,
+          stores: retainVerified ? state.stores : emptyStores,
           discoveryStatus: "error",
           discoveryError: normalized,
         });

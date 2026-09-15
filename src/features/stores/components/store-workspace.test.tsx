@@ -4,7 +4,7 @@ import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/errors";
 import type { MerchantApi } from "@/lib/backend/client";
-import type { MerchantStoreContext } from "@/lib/backend/contracts";
+import type { MerchantStoreContext, StorePage } from "@/lib/backend/contracts";
 import { MerchantApiProvider } from "@/features/auth/components/merchant-api-provider";
 import { SessionBoundary } from "@/features/auth/components/session-boundary";
 import { StoreProvider } from "./store-provider";
@@ -56,7 +56,98 @@ function Fixture({ api, children }: { api: MerchantApi; children: React.ReactNod
 }
 beforeEach(() => vi.clearAllMocks());
 
+function driftingDiscovery() {
+  const candidates = Array.from({ length: 40 }, (_, index) => ({
+    id: `abcdef12-0000-4000-8000-${index.toString(16).padStart(12, "0")}`,
+    name: `Unverified candidate ${index}`,
+    status: "active" as const,
+  }));
+  let requests = 0;
+  return async (number: number): Promise<StorePage> => {
+    if (++requests > 4) throw new ApiError("server");
+    return {
+      stores: candidates.slice((number - 1) * 20, number * 20),
+      pagination: {
+        current_page: number,
+        per_page: 20,
+        total: number === 1 ? 41 : 40,
+        last_page: number === 1 ? 3 : 2,
+      },
+    };
+  };
+}
+
 describe("Store UI authority", () => {
+  it.each(["inconsistent pagination", "network failure"])(
+    "shows a refresh error and the previously verified chooser on %s instead of zero Stores",
+    async (failure) => {
+      const api = apiFixture();
+      render(
+        <Fixture api={api}>
+          <StoreSelection />
+        </Fixture>,
+      );
+      await screen.findByRole("button", { name: "Open Store Alpha" });
+      expect(screen.getByRole("button", { name: "Open Store Bravo" })).toBeVisible();
+      if (failure === "inconsistent pagination") {
+        vi.mocked(api.listStoresPage).mockImplementation(driftingDiscovery());
+      } else {
+        vi.mocked(api.listStoresPage).mockRejectedValue(new ApiError("network"));
+      }
+      fireEvent(window, new Event("focus"));
+      expect(
+        await screen.findByRole("heading", { name: "Your stores couldn’t be loaded" }),
+      ).toBeVisible();
+      expect(screen.getByRole("button", { name: "Open Store Alpha" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Open Store Bravo" })).toBeVisible();
+      expect(screen.getByText("2 stores available")).toBeVisible();
+      expect(
+        screen.queryByRole("heading", { name: "No stores are available" }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText("0 stores available")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Unverified candidate/)).not.toBeInTheDocument();
+      expect(api.listStoresPage).toHaveBeenCalledTimes(
+        failure === "inconsistent pagination" ? 5 : 2,
+      );
+      expect(api.loadStoreContext).not.toHaveBeenCalled();
+      expect(router.replace).not.toHaveBeenCalled();
+      expect(router.push).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["cross-page drift", "incomplete single candidate"])(
+    "initial %s shows failure without zero-Store copy or single-Store auto-entry",
+    async (failure) => {
+      const api = apiFixture();
+      if (failure === "cross-page drift") {
+        vi.mocked(api.listStoresPage).mockImplementation(driftingDiscovery());
+      } else {
+        vi.mocked(api.listStoresPage).mockResolvedValue({
+          stores: [storeA],
+          pagination: { current_page: 1, per_page: 20, total: 2, last_page: 1 },
+        });
+      }
+      render(
+        <Fixture api={api}>
+          <StoreSelection />
+        </Fixture>,
+      );
+      expect(
+        await screen.findByRole("heading", { name: "Your stores couldn’t be loaded" }),
+      ).toBeVisible();
+      expect(
+        screen.queryByRole("heading", { name: "No stores are available" }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText("0 stores available")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^Open / })).not.toBeInTheDocument();
+      expect(screen.queryByText(/Unverified candidate/)).not.toBeInTheDocument();
+      expect(api.listStoresPage).toHaveBeenCalledTimes(failure === "cross-page drift" ? 4 : 2);
+      expect(api.loadStoreContext).not.toHaveBeenCalled();
+      expect(router.replace).not.toHaveBeenCalled();
+      expect(router.push).not.toHaveBeenCalled();
+    },
+  );
+
   it("normalizes a valid uppercase UUID before selecting and comparing returned authority", async () => {
     const uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const api = apiFixture([{ ...storeA, id: uuid }]);
