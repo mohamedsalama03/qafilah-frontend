@@ -37,6 +37,17 @@ function createSession(adapter?: AuthAdapter) {
       if (["unauthenticated", "session-expired", "forbidden"].includes(error.kind))
         publishInvalidation?.();
     },
+    async handleScopedReadError(error: ApiError): Promise<void> {
+      const previous = controller.getSnapshot();
+      await controller.handleScopedReadError(error);
+      // A scoped disagreement is local until identity itself confirms session loss.
+      if (
+        previous.status === "authenticated" &&
+        !previous.scopedReadError &&
+        controller.getSnapshot().status === "unauthenticated"
+      )
+        publishInvalidation?.();
+    },
   };
   return {
     queryClient,
@@ -196,6 +207,44 @@ export function SessionBoundary({
               ? "Returning to sign in…"
               : "Checking your session…"}
         </p>
+      </main>
+    );
+  if (state.scopedReadError)
+    return (
+      <main
+        className="mx-auto max-w-xl px-6 py-24"
+        aria-busy={state.revalidation?.status === "pending"}
+      >
+        {state.revalidation?.status === "pending" ? (
+          <p role="status" className="text-text-muted">
+            Checking your session…
+          </p>
+        ) : (
+          <>
+            <ErrorState
+              headingLevel={1}
+              title="Your workspace couldn’t be loaded"
+              description={
+                state.revalidation?.status === "error"
+                  ? "Your session couldn’t be rechecked. Your workspace remains hidden until the connection recovers."
+                  : "Your session is still active, but a workspace request couldn’t be completed. Try again to reload your workspace."
+              }
+              requestId={
+                (state.revalidation?.status === "error"
+                  ? state.revalidation.error
+                  : state.scopedReadError
+                ).requestId
+              }
+            />
+            <Button
+              className="mx-5"
+              variant="primary"
+              onClick={() => void session.auth.retryScopedRead()}
+            >
+              Retry workspace
+            </Button>
+          </>
+        )}
       </main>
     );
   return (

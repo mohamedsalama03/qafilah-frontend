@@ -553,6 +553,36 @@ describe("session rendering boundary", () => {
     expect(screen.queryByText("Private workspace")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Checking your session");
   });
+  it("keeps a same-principal scoped disagreement local instead of invalidating other tabs", async () => {
+    const first = adapterWithIdentity();
+    const second = adapterWithIdentity();
+    const expose = vi.fn<(session: Session) => void>();
+    render(
+      <>
+        <SessionBoundary adapter={first}>
+          <PrivateContent label="First private workspace" expose={expose} />
+        </SessionBoundary>
+        <SessionBoundary adapter={second}>
+          <PrivateContent label="Second private workspace" />
+        </SessionBoundary>
+      </>,
+    );
+    await screen.findByText("First private workspace");
+    await screen.findByText("Second private workspace");
+    await act(async () => {
+      await expose.mock.calls
+        .at(-1)![0]
+        .auth.handleScopedReadError(new ApiError("session-expired"));
+    });
+    expect(screen.queryByText("First private workspace")).not.toBeInTheDocument();
+    expect(screen.getByText("Second private workspace")).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Your workspace couldn’t be loaded" }),
+    ).toBeVisible();
+    expect(first.loadIdentity).toHaveBeenCalledTimes(2);
+    expect(second.loadIdentity).toHaveBeenCalledTimes(1);
+    expect(TestBroadcastChannel.messages).toEqual([]);
+  });
   it("rechecks a second tab after permission invalidation without trusting or echoing the signal", async () => {
     const first = adapterWithIdentity();
     const second: AuthAdapter = {

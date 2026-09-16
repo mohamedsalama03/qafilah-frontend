@@ -26,7 +26,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         api,
         queryClient: session.queryClient,
         scope: session.scope,
-        onSessionError: session.auth.handleApiError,
+        onSessionError: session.auth.handleScopedReadError,
       }),
     [api, principal.principalId, session],
   );

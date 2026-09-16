@@ -346,6 +346,9 @@ describe("Product permission and privacy boundaries", () => {
     "preserves global %s handling",
     async (kind) => {
       const api = apiFixture();
+      vi.mocked(api.authAdapter.loadIdentity)
+        .mockResolvedValueOnce({ principalId: "test-principal", displayName: "Synthetic Merchant" })
+        .mockRejectedValue(new ApiError("unauthenticated"));
       vi.mocked(api.listProducts).mockRejectedValue(new ApiError(kind));
       render(<Fixture api={api} />);
       await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/login"));

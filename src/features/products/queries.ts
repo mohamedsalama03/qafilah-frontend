@@ -59,7 +59,7 @@ function useCatalogRead<T>(
             session.scope.assertCurrent(scope);
             const normalized = normalizeUnexpectedError(error);
             if (normalized.kind === "unauthenticated" || normalized.kind === "session-expired")
-              session.auth.handleApiError(normalized);
+              void session.auth.handleScopedReadError(normalized);
             else if (normalized.kind === "forbidden") {
               // A denial also invalidates other cached views of this capability. Keep the
               // observed error for recovery, but never let a fresh cached page bypass it.

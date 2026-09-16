@@ -309,6 +309,65 @@ describe("deterministic authentication authority", () => {
   });
 });
 
+describe("scoped-read reconciliation authority", () => {
+  it("coalesces simultaneous scoped errors and keeps the latch after same-principal success", async () => {
+    let finish!: (value: { principalId: string }) => void;
+    const loadIdentity = vi
+      .fn()
+      .mockResolvedValueOnce({ principalId: "principal-a" })
+      .mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+    const purge = vi.fn();
+    const logout = vi.fn();
+    const controller = createAuthController({
+      adapter: { loadIdentity, logout },
+      onAuthorityLost: purge,
+    });
+    await controller.bootstrap();
+    const first = controller.handleScopedReadError(new ApiError("unauthenticated"));
+    const second = controller.handleScopedReadError(new ApiError("session-expired"));
+    await Promise.resolve();
+    expect(loadIdentity).toHaveBeenCalledTimes(2);
+    expect(purge).toHaveBeenCalledTimes(1);
+    expect(controller.getSnapshot()).toMatchObject({
+      status: "authenticated",
+      scopedReadError: { kind: "unauthenticated" },
+      revalidation: { status: "pending" },
+    });
+    finish({ principalId: "principal-a" });
+    await Promise.all([first, second]);
+    expect(controller.getSnapshot()).toMatchObject({
+      status: "authenticated",
+      scopedReadError: { kind: "unauthenticated" },
+    });
+    await controller.handleScopedReadError(new ApiError("session-expired"));
+    expect(loadIdentity).toHaveBeenCalledTimes(2);
+    expect(logout).not.toHaveBeenCalled();
+  });
+  it("never reconciles or replays an unconfirmed logout after a late scoped error", async () => {
+    const loadIdentity = vi.fn(async () => ({ principalId: "principal-a" }));
+    const logout = vi.fn(async () => {
+      throw new ApiError("network", { mutationOutcome: "unknown" });
+    });
+    const controller = createAuthController({ adapter: { loadIdentity, logout } });
+    await controller.bootstrap();
+    await controller.logout();
+    await controller.handleScopedReadError(new ApiError("session-expired"));
+    await controller.retryScopedRead();
+    await controller.bootstrap();
+    expect(loadIdentity).toHaveBeenCalledTimes(1);
+    expect(logout).toHaveBeenCalledTimes(1);
+    expect(controller.getSnapshot()).toMatchObject({
+      status: "logout-failed",
+      error: { mutationOutcome: "unknown" },
+    });
+  });
+});
+
 describe("post-login redirect safety", () => {
   it.each([
     "https://attacker.test",

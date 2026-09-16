@@ -20,6 +20,8 @@ export type AuthState =
   | {
       readonly status: "authenticated";
       readonly principal: AuthPrincipal;
+      /** A scoped read disagreed with identity authority; only deliberate recovery releases it. */
+      readonly scopedReadError?: ApiError;
       readonly revalidation?:
         { readonly status: "pending" } | { readonly status: "error"; readonly error: ApiError };
     }
@@ -69,7 +71,7 @@ export function createAuthController(options: AuthControllerOptions = {}) {
     return generation;
   }
 
-  return {
+  const controller = {
     getSnapshot: (): AuthState => state,
     subscribe(listener: () => void): () => void {
       listeners.add(listener);
@@ -77,7 +79,7 @@ export function createAuthController(options: AuthControllerOptions = {}) {
         listeners.delete(listener);
       };
     },
-    bootstrap(): Promise<void> {
+    bootstrap(resumeScopedReads = false): Promise<void> {
       if (!options.adapter) {
         update({ status: "unavailable" });
         return Promise.resolve();
@@ -94,6 +96,7 @@ export function createAuthController(options: AuthControllerOptions = {}) {
           ? {
               status: "authenticated",
               principal: previous.principal,
+              ...(previous.scopedReadError ? { scopedReadError: previous.scopedReadError } : {}),
               revalidation: { status: "pending" },
             }
           : { status: "bootstrapping" },
@@ -147,6 +150,12 @@ export function createAuthController(options: AuthControllerOptions = {}) {
               ? {
                   status: "authenticated",
                   principal,
+                  ...(previous &&
+                  previous.principal.principalId === principalId &&
+                  previous.scopedReadError &&
+                  !resumeScopedReads
+                    ? { scopedReadError: previous.scopedReadError }
+                    : {}),
                 }
               : { status: "unauthenticated", reason: previous ? "expired" : "not-signed-in" },
           );
@@ -160,6 +169,7 @@ export function createAuthController(options: AuthControllerOptions = {}) {
             update({
               status: "authenticated",
               principal: previous.principal,
+              ...(previous.scopedReadError ? { scopedReadError: previous.scopedReadError } : {}),
               revalidation: { status: "error", error: normalized },
             });
             return;
@@ -177,6 +187,30 @@ export function createAuthController(options: AuthControllerOptions = {}) {
       })();
       pendingBootstrap = task;
       return task;
+    },
+    /** Scoped reads are not proof of global session loss, and are never replayed here. */
+    handleScopedReadError(error: ApiError): Promise<void> {
+      if (
+        logoutRequested ||
+        !["unauthenticated", "session-expired"].includes(error.kind) ||
+        state.status !== "authenticated" ||
+        state.scopedReadError
+      )
+        return Promise.resolve();
+      const principal = state.principal;
+      revoke();
+      update({ status: "authenticated", principal, scopedReadError: error });
+      return controller.bootstrap();
+    },
+    /** User intent is required before a verified identity can remount protected reads. */
+    retryScopedRead(): Promise<void> {
+      if (
+        state.status !== "authenticated" ||
+        !state.scopedReadError ||
+        state.revalidation?.status === "pending"
+      )
+        return Promise.resolve();
+      return controller.bootstrap(true);
     },
     logout(): Promise<void> {
       if (pendingLogout) return pendingLogout;
@@ -235,4 +269,5 @@ export function createAuthController(options: AuthControllerOptions = {}) {
       listeners.clear();
     },
   };
+  return controller;
 }
