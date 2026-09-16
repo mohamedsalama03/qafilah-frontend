@@ -22,6 +22,7 @@ function useCatalogRead<T>(
   key: readonly unknown[],
   permission: "products.view" | "categories.view",
   operation: (api: MerchantApi, signal: AbortSignal) => Promise<T>,
+  options: { refetchOnWindowFocus?: boolean; refetchOnReconnect?: boolean } = {},
 ) {
   const api = useMerchantApi();
   const session = useMerchantSession();
@@ -33,12 +34,12 @@ function useCatalogRead<T>(
     if (
       current.scope !== scope ||
       current.context?.store.id !== scope.storeUuid ||
-      !current.context.permissions.includes("products.view") ||
       !current.context.permissions.includes(permission)
     )
       throw new ApiError("forbidden");
   }
   return useQuery({
+    ...options,
     queryKey: key,
     staleTime: 30_000,
     retry: false,
@@ -88,11 +89,17 @@ export function useProductList(criteria: ProductCriteria, cursor: string | null)
   );
 }
 
-export function useProduct(productUuid: string) {
+export function useProduct(
+  productUuid: string,
+  options: { refetchOnWindowFocus?: boolean; refetchOnReconnect?: boolean } = {},
+) {
   const { state } = useStores();
   const scope = state.scope!;
-  return useCatalogRead(productKeys.detail(scope, productUuid), "products.view", (api, signal) =>
-    api.loadProduct({ storeUuid: scope.storeUuid, productUuid }, signal),
+  return useCatalogRead(
+    productKeys.detail(scope, productUuid),
+    "products.view",
+    (api, signal) => api.loadProduct({ storeUuid: scope.storeUuid, productUuid }, signal),
+    options,
   );
 }
 

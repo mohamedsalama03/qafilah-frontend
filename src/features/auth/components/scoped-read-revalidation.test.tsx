@@ -69,6 +69,11 @@ function fixture() {
     loadStoreContext: vi.fn(async () => context),
     listProducts: vi.fn(async () => page),
     loadProduct: vi.fn(),
+    createProduct: vi.fn(),
+    updateProduct: vi.fn(),
+    publishProduct: vi.fn(),
+    unpublishProduct: vi.fn(),
+    archiveProduct: vi.fn(),
     listCategories: vi.fn(),
   };
   let session!: Session;

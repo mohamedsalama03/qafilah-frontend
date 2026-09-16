@@ -84,6 +84,11 @@ function apiFixture(permissions = ["products.view"]): MerchantApi {
     loadStoreContext: vi.fn(async (uuid) => context(uuid, permissions)),
     listProducts: vi.fn(async () => page()),
     loadProduct: vi.fn(async () => product()),
+    createProduct: vi.fn(),
+    updateProduct: vi.fn(),
+    publishProduct: vi.fn(),
+    unpublishProduct: vi.fn(),
+    archiveProduct: vi.fn(),
     listCategories: vi.fn(async () => ({
       categories: [],
       pagination: { per_page: 100, next_cursor: null, previous_cursor: null },

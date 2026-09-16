@@ -12,7 +12,10 @@ export type ArchitectureRule =
   | "role-derived-authority"
   | "uuid-derived-authority"
   | "tenant-selector-authority"
-  | "product-query-isolation";
+  | "product-query-isolation"
+  | "product-mutation-boundary"
+  | "product-mutation-retry"
+  | "product-mutation-isolation";
 
 export interface ArchitectureViolation {
   rule: ArchitectureRule;
@@ -308,7 +311,7 @@ export function inspectArchitecture(filename: string, source: string): Architect
     }
   }
 
-  // F2's six contracts plus exactly three F3-A Merchant reads. Evidence text cannot expand scope.
+  // F2's six contracts, three F3-A reads and exactly five F3-B writes. Evidence is not scope.
   const verifiedContracts: Record<string, readonly [string, string]> = {
     csrf: ["GET", "/sanctum/csrf-cookie"],
     login: ["POST", "/api/v1/auth/login"],
@@ -319,6 +322,11 @@ export function inspectArchitecture(filename: string, source: string): Architect
     products: ["GET", "/api/v1/stores/{value}/catalog/products?{value}"],
     product: ["GET", "/api/v1/stores/{value}/catalog/products/{value}"],
     categories: ["GET", "/api/v1/stores/{value}/catalog/categories?{value}"],
+    createProduct: ["POST", "/api/v1/stores/{value}/catalog/products"],
+    updateProduct: ["PATCH", "/api/v1/stores/{value}/catalog/products/{value}"],
+    publishProduct: ["POST", "/api/v1/stores/{value}/catalog/products/{value}/publish"],
+    unpublishProduct: ["POST", "/api/v1/stores/{value}/catalog/products/{value}/unpublish"],
+    archiveProduct: ["POST", "/api/v1/stores/{value}/catalog/products/{value}/archive"],
   };
 
   function registryEntry(node: ts.ObjectLiteralExpression): string | undefined {
@@ -394,6 +402,8 @@ export function inspectArchitecture(filename: string, source: string): Architect
       !pathExpression ||
       contractPath(pathExpression) !== expected[1] ||
       (expected[0] === "GET" && properties.has("body")) ||
+      (["publishProduct", "unpublishProduct", "archiveProduct"].includes(entry ?? "") &&
+        properties.has("body")) ||
       node.properties.some(ts.isSpreadAssignment)
     )
       report("verified-contract-registry", node);
@@ -447,6 +457,21 @@ export function inspectArchitecture(filename: string, source: string): Architect
   }
 
   const productResources = new Set(["products", "product", "product-categories"]);
+  const mutationSource = path === "src/features/products/mutations.ts";
+
+  function scopedMutationKey(expression: ts.Expression | undefined): boolean {
+    if (!expression) return false;
+    const key = resolveExpression(expression);
+    if (!ts.isCallExpression(key) || !key.arguments[0]) return false;
+    const origin = unwrap(key.arguments[0]);
+    if (!ts.isIdentifier(origin) || origin.text !== "scope") return false;
+    const target = expressionPath(key.expression);
+    if (target === "productKeys.detail") return key.arguments.length === 2;
+    return (
+      target === "storeKeys.resource" &&
+      ["products", "product"].includes(literal(key.arguments[1]) ?? "")
+    );
+  }
 
   function objectFields(
     expression: ts.Expression | undefined,
@@ -592,9 +617,42 @@ export function inspectArchitecture(filename: string, source: string): Architect
       if (
         target &&
         /\.(?:listProducts|loadProduct|listCategories)$/.test(target) &&
-        path !== "src/features/products/queries.ts"
+        path !== "src/features/products/queries.ts" &&
+        !mutationSource
       )
         report("product-query-isolation", node);
+      if (
+        target &&
+        /\.(?:createProduct|updateProduct|publishProduct|unpublishProduct|archiveProduct)$/.test(
+          target,
+        ) &&
+        !mutationSource
+      )
+        report("product-mutation-boundary", node);
+      if (
+        mutationSource &&
+        target &&
+        /^(?:(?:window|globalThis|self)\.)?(?:setTimeout|setInterval|requestAnimationFrame)$/.test(
+          target,
+        )
+      )
+        report("product-mutation-retry", node);
+      if (
+        mutationSource &&
+        ts.isCallExpression(node) &&
+        target?.endsWith(".setQueryData") &&
+        !scopedMutationKey(node.arguments[0])
+      )
+        report("product-mutation-isolation", node);
+      if (
+        mutationSource &&
+        ts.isCallExpression(node) &&
+        /\.(?:invalidateQueries|cancelQueries|removeQueries|resetQueries|refetchQueries|setQueriesData)$/.test(
+          target ?? "",
+        ) &&
+        !scopedMutationKey(objectFields(node.arguments[0])?.get("queryKey"))
+      )
+        report("product-mutation-isolation", node);
       if (
         ts.isCallExpression(node) &&
         (node.expression.kind === ts.SyntaxKind.ImportKeyword || target === "require")
@@ -637,6 +695,16 @@ export function inspectArchitecture(filename: string, source: string): Architect
     }
     if (ts.isPropertyAssignment(node)) {
       const name = nameOf(node.name);
+      if (
+        name === "retry" &&
+        (mutationSource ||
+          (path === "src/lib/query/client.ts" &&
+            ts.isObjectLiteralExpression(node.parent) &&
+            ts.isPropertyAssignment(node.parent.parent) &&
+            nameOf(node.parent.parent.name) === "mutations")) &&
+        resolveExpression(node.initializer).kind !== ts.SyntaxKind.FalseKeyword
+      )
+        report("product-mutation-retry", node);
       if (
         name &&
         (/^(?:store_id|tenant_id)$/.test(name) || /^x-(?:store|tenant)(?:-id|-uuid)?$/i.test(name))

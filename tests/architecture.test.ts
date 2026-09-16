@@ -55,13 +55,13 @@ describe("permanent executable architecture boundaries", () => {
       "src/lib/backend/contracts.ts",
     ],
     [
-      "Product archive added as a new registry entry",
+      "Product hard delete added as a new registry entry",
       "verified-contract-registry",
-      'export const merchantContracts = { archiveProduct: { method: "POST", path: input => `/api/v1/stores/${input.storeUuid}/catalog/products/${input.productUuid}/archive` } };',
+      'export const merchantContracts = { deleteProduct: { method: "DELETE", path: input => `/api/v1/stores/${input.storeUuid}/catalog/products/${input.productUuid}` } };',
       "src/lib/backend/contracts.ts",
     ],
     [
-      "Product media read is outside authorized F3-A scope",
+      "Product media read is outside authorized core Product scope",
       "verified-contract-registry",
       'export const merchantContracts = { media: { method: "GET", path: input => `/api/v1/stores/${input.storeUuid}/catalog/products/${input.productUuid}/media` } };',
       "src/lib/backend/contracts.ts",
@@ -477,6 +477,8 @@ describe("permanent executable architecture boundaries", () => {
       const roleLabel = <span>{context.role.name}</span>;
       const hasPermission = context.permissions.includes("orders.view");
       const requestedUuid = parseStoreUuid(params.storeUuid);
+      // api.createProduct({data}); setTimeout(() => mutation.execute(command), 0);
+      const mutationExample = 'queryClient.invalidateQueries({queryKey:["products"]}); retry: 2';
     `;
     expect(inspectArchitecture(merchantFile, source)).toEqual([]);
   });
@@ -538,19 +540,24 @@ describe("permanent executable architecture boundaries", () => {
     );
   });
 
-  it("activates exactly F2 plus the three published F3-A read contracts", () => {
+  it("activates exactly F2 plus three F3-A reads and five F3-B mutations", () => {
     const uuid = "15913d0d-10a1-40ed-bc6f-3e491f81a56f";
     expect(backendBaseline).toBe("6614690a3b24b39f45c7c1b9ed85c20ecb22cbbf");
     expect(Object.keys(merchantContracts).sort()).toEqual([
+      "archiveProduct",
       "categories",
       "context",
+      "createProduct",
       "csrf",
       "identity",
       "login",
       "logout",
       "product",
       "products",
+      "publishProduct",
       "stores",
+      "unpublishProduct",
+      "updateProduct",
     ]);
     expect([
       [merchantContracts.csrf.method, merchantContracts.csrf.path()],
@@ -565,6 +572,33 @@ describe("permanent executable architecture boundaries", () => {
         merchantContracts.product.path({ storeUuid: uuid, productUuid: uuid }),
       ],
       [merchantContracts.categories.method, merchantContracts.categories.path({ storeUuid: uuid })],
+      [
+        merchantContracts.createProduct.method,
+        merchantContracts.createProduct.path({
+          storeUuid: uuid,
+          data: { name: "Sample", slug: "sample", description: "Description" },
+        }),
+      ],
+      [
+        merchantContracts.updateProduct.method,
+        merchantContracts.updateProduct.path({
+          storeUuid: uuid,
+          productUuid: uuid,
+          data: { name: "Changed" },
+        }),
+      ],
+      [
+        merchantContracts.publishProduct.method,
+        merchantContracts.publishProduct.path({ storeUuid: uuid, productUuid: uuid }),
+      ],
+      [
+        merchantContracts.unpublishProduct.method,
+        merchantContracts.unpublishProduct.path({ storeUuid: uuid, productUuid: uuid }),
+      ],
+      [
+        merchantContracts.archiveProduct.method,
+        merchantContracts.archiveProduct.path({ storeUuid: uuid, productUuid: uuid }),
+      ],
     ]).toEqual([
       ["GET", "/sanctum/csrf-cookie"],
       ["POST", "/api/v1/auth/login"],
@@ -575,6 +609,11 @@ describe("permanent executable architecture boundaries", () => {
       ["GET", `/api/v1/stores/${uuid}/catalog/products?sort=newest&per_page=25`],
       ["GET", `/api/v1/stores/${uuid}/catalog/products/${uuid}`],
       ["GET", `/api/v1/stores/${uuid}/catalog/categories?sort=newest&per_page=100`],
+      ["POST", `/api/v1/stores/${uuid}/catalog/products`],
+      ["PATCH", `/api/v1/stores/${uuid}/catalog/products/${uuid}`],
+      ["POST", `/api/v1/stores/${uuid}/catalog/products/${uuid}/publish`],
+      ["POST", `/api/v1/stores/${uuid}/catalog/products/${uuid}/unpublish`],
+      ["POST", `/api/v1/stores/${uuid}/catalog/products/${uuid}/archive`],
     ]);
     expect(() => merchantContracts.stores.path(0)).toThrow();
     expect(() => merchantContracts.context.path("valid-shape-is-not-membership")).toThrow();
@@ -623,7 +662,7 @@ describe("permanent executable architecture boundaries", () => {
   });
 
   it.each(["publish", "unpublish", "archive", "pricing", "inventory", "variants", "media"])(
-    "rejects adding unapproved Product %s to the actual registry",
+    "rejects replacing the Product GET with a %s route in the actual registry",
     (suffix) => {
       const file = "src/lib/backend/contracts.ts";
       const source = readFileSync(join(root, file), "utf8");
@@ -646,4 +685,93 @@ describe("permanent executable architecture boundaries", () => {
       "verified-contract-registry",
     );
   });
+
+  it.each([
+    ["restoreProduct", "POST", "restore"],
+    ["updateProductPrice", "PATCH", "pricing"],
+    ["updateProductInventory", "PATCH", "inventory"],
+    ["createVariant", "POST", "variants"],
+    ["attachMedia", "POST", "media"],
+  ])("rejects out-of-scope mutation contract %s", (name, method, suffix) => {
+    const source = `export const merchantContracts = { ${name}: { method: "${method}", path: input => \`/api/v1/stores/\${input.storeUuid}/catalog/products/\${input.productUuid}/${suffix}\` } };`;
+    expect(
+      inspectArchitecture("src/lib/backend/contracts.ts", source).map(({ rule }) => rule),
+    ).toContain("verified-contract-registry");
+  });
+
+  it.each([
+    "createProduct",
+    "updateProduct",
+    "publishProduct",
+    "unpublishProduct",
+    "archiveProduct",
+  ])("requires the shared scoped mutation lifecycle for %s", (name) => {
+    expect(
+      inspectArchitecture(merchantFile, `api.${name}(input);`).map(({ rule }) => rule),
+    ).toContain("product-mutation-boundary");
+    expect(
+      inspectArchitecture("src/features/products/mutations.ts", `api.${name}(input);`),
+    ).toEqual([]);
+  });
+
+  it.each([
+    "useMutation({ mutationFn: write, retry: true });",
+    "useMutation({ mutationFn: write, retry: 2 });",
+    "useMutation({ mutationFn: write, retry: () => true });",
+    "setTimeout(() => controller.execute(command), 10);",
+    "window.setInterval(() => controller.execute(command), 10);",
+  ])("rejects automatic mutation replay scheduling: %s", (source) => {
+    expect(
+      inspectArchitecture("src/features/products/mutations.ts", source).map(({ rule }) => rule),
+    ).toContain("product-mutation-retry");
+  });
+
+  it.each([
+    'queryClient.setQueryData(["product", productUuid], product);',
+    "queryClient.invalidateQueries();",
+    'queryClient.invalidateQueries({queryKey: ["products"]});',
+    "queryClient.removeQueries({predicate: () => true});",
+    'queryClient.cancelQueries({queryKey: storeKeys.resource(otherScope, "products")});',
+    "queryClient.setQueryData(productKeys.detail(storeUuid, productUuid), product);",
+  ])("rejects unscoped mutation cache reconciliation: %s", (source) => {
+    expect(
+      inspectArchitecture("src/features/products/mutations.ts", source).map(({ rule }) => rule),
+    ).toContain("product-mutation-isolation");
+  });
+
+  it("keeps mutation retries disabled in the actual QueryClient defaults", () => {
+    const file = "src/lib/query/client.ts";
+    const source = readFileSync(join(root, file), "utf8");
+    const mutant = source.replace("mutations: { retry: false }", "mutations: { retry: true }");
+    expect(mutant).not.toBe(source);
+    expect(inspectArchitecture(file, source)).toEqual([]);
+    expect(inspectArchitecture(file, mutant).map(({ rule }) => rule)).toContain(
+      "product-mutation-retry",
+    );
+  });
+
+  it.each([
+    ['storeKeys.resource(scope, "products")', 'storeKeys.resource(otherScope, "products")'],
+    ["productKeys.detail(scope, product.id)", '["product", product.id]'],
+  ])("rejects operative scoped mutation cache mutant: %s", (anchor, replacement) => {
+    const file = "src/features/products/mutations.ts";
+    const source = readFileSync(join(root, file), "utf8");
+    const mutant = source.replace(anchor, replacement);
+    expect(mutant).not.toBe(source);
+    expect(inspectArchitecture(file, source)).toEqual([]);
+    expect(inspectArchitecture(file, mutant).map(({ rule }) => rule)).toContain(
+      "product-mutation-isolation",
+    );
+  });
+
+  it.each(["publishProduct", "unpublishProduct", "archiveProduct"])(
+    "rejects hidden mutation fields on the bodyless %s contract",
+    (entry) => {
+      const suffix = entry.replace("Product", "");
+      const source = `export const merchantContracts = { ${entry}: { method: "POST", path: input => \`/api/v1/stores/\${input.storeUuid}/catalog/products/\${input.productUuid}/${suffix}\`, body: input => ({status: input.status}) } };`;
+      expect(
+        inspectArchitecture("src/lib/backend/contracts.ts", source).map(({ rule }) => rule),
+      ).toContain("verified-contract-registry");
+    },
+  );
 });

@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { Package } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonStyles } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { useStores } from "@/features/stores/components/store-provider";
@@ -172,6 +172,17 @@ function AuthorizedProducts() {
       <PageHeader
         title="Products"
         description="Browse your catalog and inspect product information."
+        primaryAction={
+          state.context!.permissions.includes("products.create") ? (
+            <Link
+              href={`/stores/${state.scope!.storeUuid}/products/new`}
+              prefetch={false}
+              className={buttonStyles({ variant: "primary" })}
+            >
+              Create product
+            </Link>
+          ) : undefined
+        }
         secondaryActions={
           <>
             <RefreshAccess />

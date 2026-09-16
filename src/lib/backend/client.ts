@@ -1,10 +1,21 @@
 import { createApiClient } from "../api/client";
 import { ApiError } from "../api/errors";
+import type { EndpointContract } from "../api/types";
 import type {
   CategoryListInput,
+  MerchantProduct,
   ProductListInput,
   ProductReadInput,
 } from "../../features/products/contracts";
+import type {
+  CreateProductInput,
+  ProductLifecycleInput,
+  UpdateProductInput,
+} from "../../features/products/mutation-contracts";
+import {
+  normalizeCreateProductPayload,
+  normalizeUpdateProductPayload,
+} from "../../features/products/mutation-model";
 import { normalizeCategoryCriteria, normalizeProductCriteria } from "../../features/products/model";
 import type { AuthAdapter } from "../auth/controller";
 import { parseStoreUuid } from "../query/keys";
@@ -58,6 +69,26 @@ export function createMerchantApi(options: MerchantApiOptions) {
     api.request(merchantContracts.identity, undefined, { signal });
   const prepareCsrf = (signal?: AbortSignal) =>
     api.request(merchantContracts.csrf, undefined, { signal });
+
+  async function requestProductMutation<Input>(
+    contract: EndpointContract<Input, MerchantProduct>,
+    input: Input,
+    signal?: AbortSignal,
+    productUuid?: string,
+  ): Promise<MerchantProduct> {
+    try {
+      contract.path(input);
+      contract.body?.(input);
+    } catch {
+      throw new ApiError("configuration");
+    }
+    // Fresh CSRF precedes this deliberate request. Neither transport nor this adapter replays it.
+    await prepareCsrf(signal);
+    const result = await api.request(contract, input, { signal });
+    if (productUuid && result.id.toLowerCase() !== productUuid.toLowerCase())
+      throw new ApiError("invalid-response", { mutationOutcome: "unknown" });
+    return result;
+  }
 
   async function confirmLogin(
     credentials: LoginCredentials,
@@ -197,6 +228,63 @@ export function createMerchantApi(options: MerchantApiOptions) {
       if (result.pagination.per_page !== requestInput.criteria!.per_page)
         throw new ApiError("invalid-response");
       return result;
+    },
+    async createProduct(input: CreateProductInput, signal?: AbortSignal) {
+      let requestInput: CreateProductInput;
+      try {
+        requestInput = {
+          storeUuid: input.storeUuid,
+          data: normalizeCreateProductPayload(input.data),
+        };
+      } catch {
+        throw new ApiError("configuration");
+      }
+      return requestProductMutation(merchantContracts.createProduct, requestInput, signal);
+    },
+    async updateProduct(input: UpdateProductInput, signal?: AbortSignal) {
+      let requestInput: UpdateProductInput;
+      try {
+        requestInput = {
+          storeUuid: input.storeUuid,
+          productUuid: input.productUuid,
+          data: normalizeUpdateProductPayload(input.data),
+        };
+      } catch {
+        throw new ApiError("configuration");
+      }
+      return requestProductMutation(
+        merchantContracts.updateProduct,
+        requestInput,
+        signal,
+        requestInput.productUuid,
+      );
+    },
+    async publishProduct(input: ProductLifecycleInput, signal?: AbortSignal) {
+      const requestInput = { storeUuid: input.storeUuid, productUuid: input.productUuid };
+      return requestProductMutation(
+        merchantContracts.publishProduct,
+        requestInput,
+        signal,
+        requestInput.productUuid,
+      );
+    },
+    async unpublishProduct(input: ProductLifecycleInput, signal?: AbortSignal) {
+      const requestInput = { storeUuid: input.storeUuid, productUuid: input.productUuid };
+      return requestProductMutation(
+        merchantContracts.unpublishProduct,
+        requestInput,
+        signal,
+        requestInput.productUuid,
+      );
+    },
+    async archiveProduct(input: ProductLifecycleInput, signal?: AbortSignal) {
+      const requestInput = { storeUuid: input.storeUuid, productUuid: input.productUuid };
+      return requestProductMutation(
+        merchantContracts.archiveProduct,
+        requestInput,
+        signal,
+        requestInput.productUuid,
+      );
     },
   };
 }

@@ -13,6 +13,16 @@ import {
   type ProductReadInput,
 } from "../../features/products/contracts";
 import { catalogUuidSchema } from "../../features/products/model";
+import {
+  productMutationErrorFields,
+  type CreateProductInput,
+  type ProductLifecycleInput,
+  type UpdateProductInput,
+} from "../../features/products/mutation-contracts";
+import {
+  normalizeCreateProductPayload,
+  normalizeUpdateProductPayload,
+} from "../../features/products/mutation-model";
 import { hasAsciiControlCharacters } from "../api/control-characters";
 import { readLaravelValidationErrors } from "../api/errors";
 import type { ContractEvidence, EndpointContract, SafeErrorDetails } from "../api/types";
@@ -228,6 +238,58 @@ export const merchantContracts = {
     decodeError: (payload: unknown) =>
       validation(payload, ["status", "q", "sort", "per_page", "cursor"]),
   } satisfies EndpointContract<CategoryListInput, CategoryPage>,
+  createProduct: {
+    evidence: evidence(
+      "routes/api.php:406; Catalog CreateProductRequest/CreateProductAction/MerchantProductController::store/MerchantProductResource/ProductPolicy; CatalogApiTest",
+    ),
+    method: "POST",
+    path: (input: CreateProductInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products`,
+    body: (input: CreateProductInput) => normalizeCreateProductPayload(input.data),
+    decode: decodeMerchantProduct,
+    decodeError: (payload: unknown) => validation(payload, productMutationErrorFields),
+  } satisfies EndpointContract<CreateProductInput, MerchantProduct>,
+  updateProduct: {
+    evidence: evidence(
+      "routes/api.php:460; Catalog UpdateProductRequest/UpdateProductAction/MerchantProductController::update/MerchantProductResource/ProductPolicy; CatalogApiTest",
+    ),
+    method: "PATCH",
+    path: (input: UpdateProductInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}`,
+    body: (input: UpdateProductInput) => normalizeUpdateProductPayload(input.data),
+    decode: decodeMerchantProduct,
+    decodeError: (payload: unknown) => validation(payload, productMutationErrorFields),
+  } satisfies EndpointContract<UpdateProductInput, MerchantProduct>,
+  publishProduct: {
+    evidence: evidence(
+      "routes/api.php:462; Catalog MerchantCatalogActionRequest/TransitionProductAction::publish/MerchantProductController::publish/MerchantProductResource/ProductPolicy",
+    ),
+    method: "POST",
+    path: (input: ProductLifecycleInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/publish`,
+    decode: decodeMerchantProduct,
+    decodeError: (payload: unknown) => validation(payload, ["status"]),
+  } satisfies EndpointContract<ProductLifecycleInput, MerchantProduct>,
+  unpublishProduct: {
+    evidence: evidence(
+      "routes/api.php:464; Catalog MerchantCatalogActionRequest/TransitionProductAction::unpublish/MerchantProductController::unpublish/MerchantProductResource/ProductPolicy",
+    ),
+    method: "POST",
+    path: (input: ProductLifecycleInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/unpublish`,
+    decode: decodeMerchantProduct,
+    decodeError: (payload: unknown) => validation(payload, ["status"]),
+  } satisfies EndpointContract<ProductLifecycleInput, MerchantProduct>,
+  archiveProduct: {
+    evidence: evidence(
+      "routes/api.php:466; Catalog MerchantCatalogActionRequest/TransitionProductAction::archive/MerchantProductController::archive/MerchantProductResource/ProductPolicy",
+    ),
+    method: "POST",
+    path: (input: ProductLifecycleInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/archive`,
+    decode: decodeMerchantProduct,
+    decodeError: (payload: unknown) => validation(payload, ["status"]),
+  } satisfies EndpointContract<ProductLifecycleInput, MerchantProduct>,
 } as const;
 
 export const csrfEvidence = evidence(

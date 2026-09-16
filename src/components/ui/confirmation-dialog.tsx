@@ -14,6 +14,7 @@ export interface ConfirmationDialogProps {
   pending?: boolean;
   error?: string;
   destructive?: boolean;
+  privateContent?: boolean;
 }
 
 export function ConfirmationDialog({
@@ -25,6 +26,7 @@ export function ConfirmationDialog({
   pending = false,
   error,
   destructive = false,
+  privateContent = false,
 }: ConfirmationDialogProps) {
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -62,8 +64,12 @@ export function ConfirmationDialog({
     >
       <Dialog.Trigger asChild>{trigger}</Dialog.Trigger>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-text/35" />
+        <Dialog.Overlay
+          data-merchant-private-overlay={privateContent ? "" : undefined}
+          className="fixed inset-0 z-50 bg-text/35"
+        />
         <Dialog.Content
+          data-merchant-private-overlay={privateContent ? "" : undefined}
           className="fixed start-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg bg-surface p-5 shadow-xl focus:outline-none rtl:translate-x-1/2"
           onOpenAutoFocus={(event) => {
             event.preventDefault();

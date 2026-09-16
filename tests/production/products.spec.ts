@@ -5,7 +5,12 @@ test("production Product deep links fail closed without private catalog or fixtu
 }) => {
   const store = "46ab2be4-ff91-4f69-a5c2-8c51fbd833b3";
   const product = "21a0f8af-104e-4a74-af38-eacb40cd1ed9";
-  for (const route of [`/stores/${store}/products`, `/stores/${store}/products/${product}`]) {
+  for (const route of [
+    `/stores/${store}/products`,
+    `/stores/${store}/products/${product}`,
+    `/stores/${store}/products/new`,
+    `/stores/${store}/products/${product}/edit`,
+  ]) {
     const response = await page.goto(route);
     expect(response?.status()).toBe(200);
     await expect(page.getByRole("heading", { name: "Sign in to your workspace" })).toBeVisible();

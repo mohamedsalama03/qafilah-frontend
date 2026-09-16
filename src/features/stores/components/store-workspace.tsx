@@ -109,7 +109,15 @@ export function StoreWorkspace({
                 icon: "table" as const,
               },
             ]
-          : []),
+          : context.permissions.includes("products.create")
+            ? [
+                {
+                  href: `/stores/${context.store.id}/products/new`,
+                  label: "Create product",
+                  icon: "table" as const,
+                },
+              ]
+            : []),
       ]}
       sidebarStoreContext={<StoreSwitcher />}
       storeContext={

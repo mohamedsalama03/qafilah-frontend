@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/error-state";
 import { useStores } from "./store-provider";
 import { StoreList } from "./store-list";
+import { confirmUnsavedNavigation } from "@/lib/forms/unsaved-changes";
 
 export function StoreSwitcher() {
   const { controller, state } = useStores();
@@ -77,6 +78,7 @@ export function StoreSwitcher() {
                 selectedUuid={state.selectedUuid}
                 searchId={`${id}-search`}
                 onSelect={(uuid) => {
+                  if (uuid !== state.selectedUuid && !confirmUnsavedNavigation()) return;
                   void controller.select(uuid);
                   setOpen(false);
                   router.push(

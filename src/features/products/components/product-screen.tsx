@@ -9,6 +9,7 @@ import { useStores } from "@/features/stores/components/store-provider";
 import { ApiError } from "@/lib/api/errors";
 import { useProduct } from "../queries";
 import { catalogUuidSchema, formatProductPrice } from "../model";
+import { ProductActions } from "./product-actions";
 import {
   availabilityLabel,
   CatalogError,
@@ -62,116 +63,119 @@ function ProductDetail({ productUuid }: { productUuid: string }) {
       ) : !product ? (
         <ProductLoading detail />
       ) : (
-        <DetailLayout
-          sidebar={
-            <>
-              <Section title="Product information">
-                <dl className="space-y-4">
-                  <div>
-                    <dt className="text-xs text-text-muted">Type</dt>
-                    <dd>{product.type === "simple" ? "Simple product" : "Variant product"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-text-muted">Slug</dt>
-                    <dd>{product.slug}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-text-muted">Product ID</dt>
-                    <dd className="text-xs">{product.id}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-text-muted">Shipping</dt>
-                    <dd>
-                      {product.requires_shipping ? "Shipping required" : "Shipping not required"}
-                    </dd>
-                  </div>
-                </dl>
-              </Section>
-              <Section title="Timeline">
-                <dl className="space-y-4">
-                  {(
-                    [
-                      ["Created", product.created_at],
-                      ["Updated", product.updated_at],
-                      ["Published", product.published_at],
-                    ] as const
-                  ).map(([label, value]) => (
-                    <div key={label}>
-                      <dt className="text-xs text-text-muted">{label}</dt>
-                      <dd>{value ? <ProductTime value={value} /> : "Not published"}</dd>
+        <>
+          <ProductActions product={product} />
+          <DetailLayout
+            sidebar={
+              <>
+                <Section title="Product information">
+                  <dl className="space-y-4">
+                    <div>
+                      <dt className="text-xs text-text-muted">Type</dt>
+                      <dd>{product.type === "simple" ? "Simple product" : "Variant product"}</dd>
                     </div>
-                  ))}
-                </dl>
-                <p className="mt-4 text-xs text-text-muted">Dates shown in UTC.</p>
-              </Section>
-            </>
-          }
-        >
-          <Section title="Description">
-            <p className="max-w-prose whitespace-pre-wrap [overflow-wrap:anywhere]">
-              {product.description}
-            </p>
-          </Section>
-          <Section title="Commercial summary">
-            <dl className="grid gap-5 sm:grid-cols-3">
-              <div>
-                <dt className="text-xs text-text-muted">Price</dt>
-                <dd className="mt-1 font-medium tabular-nums">{formatProductPrice(product)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-text-muted">Availability</dt>
-                <dd className="mt-1">{availabilityLabel(product.availability)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-text-muted">Quantity</dt>
-                <dd className="mt-1 tabular-nums">
-                  {product.type === "variant"
-                    ? "Managed per variant"
-                    : product.quantity === null
-                      ? "Not configured"
-                      : String(product.quantity)}
-                </dd>
-              </div>
-            </dl>
-            {product.type === "variant" && (
-              <p className="mt-5 border-t border-border pt-4 text-xs leading-5 text-text-muted">
-                The starting price and availability summarize active variants independently. The
-                lowest-priced variant may not be in stock.
+                    <div>
+                      <dt className="text-xs text-text-muted">Slug</dt>
+                      <dd>{product.slug}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-text-muted">Product ID</dt>
+                      <dd className="text-xs">{product.id}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-text-muted">Shipping</dt>
+                      <dd>
+                        {product.requires_shipping ? "Shipping required" : "Shipping not required"}
+                      </dd>
+                    </div>
+                  </dl>
+                </Section>
+                <Section title="Timeline">
+                  <dl className="space-y-4">
+                    {(
+                      [
+                        ["Created", product.created_at],
+                        ["Updated", product.updated_at],
+                        ["Published", product.published_at],
+                      ] as const
+                    ).map(([label, value]) => (
+                      <div key={label}>
+                        <dt className="text-xs text-text-muted">{label}</dt>
+                        <dd>{value ? <ProductTime value={value} /> : "Not published"}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <p className="mt-4 text-xs text-text-muted">Dates shown in UTC.</p>
+                </Section>
+              </>
+            }
+          >
+            <Section title="Description">
+              <p className="max-w-prose whitespace-pre-wrap [overflow-wrap:anywhere]">
+                {product.description}
               </p>
-            )}
-          </Section>
-          <Section title="Categories">
-            {product.categories.length ? (
-              <ul className="divide-y divide-border">
-                {product.categories.map((category) => (
-                  <li
-                    key={category.id}
-                    className="flex flex-wrap items-start justify-between gap-2 py-2 first:pt-0 last:pb-0"
-                  >
-                    <span className="min-w-0">{category.name}</span>
-                    <span className="text-xs text-text-muted">
-                      {category.status === "visible" ? "Visible" : "Hidden"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-text-muted">No categories assigned.</p>
-            )}
-          </Section>
-          <Section title="SEO information">
-            <dl className="space-y-4">
-              <div>
-                <dt className="text-xs text-text-muted">SEO title</dt>
-                <dd>{product.seo_title ?? "Not configured"}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-text-muted">SEO description</dt>
-                <dd>{product.seo_description ?? "Not configured"}</dd>
-              </div>
-            </dl>
-          </Section>
-        </DetailLayout>
+            </Section>
+            <Section title="Commercial summary">
+              <dl className="grid gap-5 sm:grid-cols-3">
+                <div>
+                  <dt className="text-xs text-text-muted">Price</dt>
+                  <dd className="mt-1 font-medium tabular-nums">{formatProductPrice(product)}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-text-muted">Availability</dt>
+                  <dd className="mt-1">{availabilityLabel(product.availability)}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-text-muted">Quantity</dt>
+                  <dd className="mt-1 tabular-nums">
+                    {product.type === "variant"
+                      ? "Managed per variant"
+                      : product.quantity === null
+                        ? "Not configured"
+                        : String(product.quantity)}
+                  </dd>
+                </div>
+              </dl>
+              {product.type === "variant" && (
+                <p className="mt-5 border-t border-border pt-4 text-xs leading-5 text-text-muted">
+                  The starting price and availability summarize active variants independently. The
+                  lowest-priced variant may not be in stock.
+                </p>
+              )}
+            </Section>
+            <Section title="Categories">
+              {product.categories.length ? (
+                <ul className="divide-y divide-border">
+                  {product.categories.map((category) => (
+                    <li
+                      key={category.id}
+                      className="flex flex-wrap items-start justify-between gap-2 py-2 first:pt-0 last:pb-0"
+                    >
+                      <span className="min-w-0">{category.name}</span>
+                      <span className="text-xs text-text-muted">
+                        {category.status === "visible" ? "Visible" : "Hidden"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-text-muted">No categories assigned.</p>
+              )}
+            </Section>
+            <Section title="SEO information">
+              <dl className="space-y-4">
+                <div>
+                  <dt className="text-xs text-text-muted">SEO title</dt>
+                  <dd>{product.seo_title ?? "Not configured"}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-text-muted">SEO description</dt>
+                  <dd>{product.seo_description ?? "Not configured"}</dd>
+                </div>
+              </dl>
+            </Section>
+          </DetailLayout>
+        </>
       )}
     </>
   );
