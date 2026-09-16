@@ -31,6 +31,128 @@ describe("permanent executable architecture boundaries", () => {
 
   const mutants: Array<[string, ArchitectureRule, string, string?]> = [
     [
+      "Storefront Product substitution",
+      "verified-contract-registry",
+      'export const merchantContracts = { products: { method: "GET", path: input => `/api/v1/storefront/catalog/products?${input.query}` } };',
+      "src/lib/backend/contracts.ts",
+    ],
+    [
+      "Platform Product substitution",
+      "verified-contract-registry",
+      'export const merchantContracts = { product: { method: "GET", path: input => `/api/v1/platform/products/${input.productUuid}` } };',
+      "src/lib/backend/contracts.ts",
+    ],
+    [
+      "Product create reuses approved collection path",
+      "verified-contract-registry",
+      'export const merchantContracts = { products: { method: "POST", path: input => `/api/v1/stores/${input.storeUuid}/catalog/products?${input.query}` } };',
+      "src/lib/backend/contracts.ts",
+    ],
+    [
+      "Product update reuses approved detail path",
+      "verified-contract-registry",
+      'export const merchantContracts = { product: { method: "PATCH", path: input => `/api/v1/stores/${input.storeUuid}/catalog/products/${input.productUuid}` } };',
+      "src/lib/backend/contracts.ts",
+    ],
+    [
+      "Product archive added as a new registry entry",
+      "verified-contract-registry",
+      'export const merchantContracts = { archiveProduct: { method: "POST", path: input => `/api/v1/stores/${input.storeUuid}/catalog/products/${input.productUuid}/archive` } };',
+      "src/lib/backend/contracts.ts",
+    ],
+    [
+      "Product media read is outside authorized F3-A scope",
+      "verified-contract-registry",
+      'export const merchantContracts = { media: { method: "GET", path: input => `/api/v1/stores/${input.storeUuid}/catalog/products/${input.productUuid}/media` } };',
+      "src/lib/backend/contracts.ts",
+    ],
+    [
+      "Product read attempts to attach a mutation body",
+      "verified-contract-registry",
+      'export const merchantContracts = { product: { method: "GET", path: input => `/api/v1/stores/${input.storeUuid}/catalog/products/${input.productUuid}`, body: input => ({name: input.name}) } };',
+      "src/lib/backend/contracts.ts",
+    ],
+    [
+      "Product UUID presence grants read capability",
+      "uuid-derived-authority",
+      "const canViewProducts = Boolean(productUuid);",
+    ],
+    [
+      "Product response UUID grants authority",
+      "uuid-derived-authority",
+      "function hasPermission(product) { return !!product.id; }",
+    ],
+    [
+      "client tenant ID grants authority",
+      "uuid-derived-authority",
+      "const canViewProducts = !!input.tenant_id;",
+    ],
+    [
+      "client Product request supplies a Store authority selector",
+      "tenant-selector-authority",
+      "const body = { store_id: selectedStore, q: prefix };",
+    ],
+    [
+      "client Product request supplies a tenant authority selector",
+      "tenant-selector-authority",
+      "const params = { tenant_id: tenantUuid };",
+    ],
+    [
+      "Store header claims tenant authority",
+      "tenant-selector-authority",
+      'const headers = new Headers(); headers.set("X-Store-Id", storeUuid);',
+    ],
+    [
+      "tenant header claims authority",
+      "tenant-selector-authority",
+      'const headers = { "X-Tenant-Id": tenantUuid };',
+    ],
+    [
+      "Product list cache uses only a Store UUID",
+      "product-query-isolation",
+      'useQuery({ queryKey: ["products", storeUuid], queryFn });',
+    ],
+    [
+      "Product detail cache lacks principal and scope revision",
+      "product-query-isolation",
+      'useQuery({ queryKey: ["product", storeUuid, productUuid], queryFn });',
+    ],
+    [
+      "Product Category lookup uses a global cache",
+      "product-query-isolation",
+      'useQuery({ queryKey: ["product-categories"], queryFn });',
+    ],
+    [
+      "Product component bypasses the scoped read hook",
+      "product-query-isolation",
+      "api.loadProduct({ storeUuid, productUuid });",
+    ],
+    [
+      "Product component performs direct business fetch",
+      "central-api-boundary",
+      "fetch(`/api/v1/stores/${storeUuid}/catalog/products`);",
+    ],
+    [
+      "Product description is interpreted as HTML",
+      "unsafe-html",
+      "const content = <div dangerouslySetInnerHTML={{ __html: product.description }} />;",
+    ],
+    [
+      "Product permissions inferred from a Manager label",
+      "role-derived-authority",
+      'const canViewProducts = context.role.name === "Manager";',
+    ],
+    [
+      "Storefront Product helper imported",
+      "merchant-surface-boundary",
+      'import { readProduct } from "@/features/storefront/catalog";',
+    ],
+    [
+      "Product cursor persisted between principals",
+      "browser-persistence",
+      'sessionStorage.setItem("product-cursor", cursor);',
+    ],
+    [
       "contract copy overrides a reviewed path",
       "verified-contract-registry",
       'const endpoint = { ...merchantContracts.identity, path: () => "/api/v1/invented" };',
@@ -78,7 +200,7 @@ describe("permanent executable architecture boundaries", () => {
       "src/lib/backend/contracts.ts",
     ],
     [
-      "domain feature endpoint outside F2",
+      "Product endpoint replaces the Store context authority endpoint",
       "verified-contract-registry",
       'export const merchantContracts = { context: { method: "GET", path: id => `/api/v1/stores/${id}/catalog/products` } };',
       "src/lib/backend/contracts.ts",
@@ -416,15 +538,18 @@ describe("permanent executable architecture boundaries", () => {
     );
   });
 
-  it("activates exactly the six published F2 method/path contracts", () => {
+  it("activates exactly F2 plus the three published F3-A read contracts", () => {
     const uuid = "15913d0d-10a1-40ed-bc6f-3e491f81a56f";
     expect(backendBaseline).toBe("6614690a3b24b39f45c7c1b9ed85c20ecb22cbbf");
     expect(Object.keys(merchantContracts).sort()).toEqual([
+      "categories",
       "context",
       "csrf",
       "identity",
       "login",
       "logout",
+      "product",
+      "products",
       "stores",
     ]);
     expect([
@@ -434,6 +559,12 @@ describe("permanent executable architecture boundaries", () => {
       [merchantContracts.logout.method, merchantContracts.logout.path()],
       [merchantContracts.stores.method, merchantContracts.stores.path(2)],
       [merchantContracts.context.method, merchantContracts.context.path(uuid)],
+      [merchantContracts.products.method, merchantContracts.products.path({ storeUuid: uuid })],
+      [
+        merchantContracts.product.method,
+        merchantContracts.product.path({ storeUuid: uuid, productUuid: uuid }),
+      ],
+      [merchantContracts.categories.method, merchantContracts.categories.path({ storeUuid: uuid })],
     ]).toEqual([
       ["GET", "/sanctum/csrf-cookie"],
       ["POST", "/api/v1/auth/login"],
@@ -441,10 +572,69 @@ describe("permanent executable architecture boundaries", () => {
       ["POST", "/api/v1/auth/logout"],
       ["GET", "/api/v1/me/stores?page=2"],
       ["GET", `/api/v1/stores/${uuid}/context`],
+      ["GET", `/api/v1/stores/${uuid}/catalog/products?sort=newest&per_page=25`],
+      ["GET", `/api/v1/stores/${uuid}/catalog/products/${uuid}`],
+      ["GET", `/api/v1/stores/${uuid}/catalog/categories?sort=newest&per_page=100`],
     ]);
     expect(() => merchantContracts.stores.path(0)).toThrow();
     expect(() => merchantContracts.context.path("valid-shape-is-not-membership")).toThrow();
   });
+
+  it.each([
+    [
+      "list",
+      'storeKeys.resource(scope, "products", { criteria, cursor })',
+      'storeKeys.resource(scope, "products", { criteria })',
+    ],
+    [
+      "normalized criteria",
+      'storeKeys.resource(scope, "products", { criteria, cursor })',
+      'storeKeys.resource(scope, "products", { cursor })',
+    ],
+    [
+      "Product UUID",
+      'storeKeys.resource(scope, "product", { productUuid })',
+      'storeKeys.resource(scope, "product", {})',
+    ],
+    [
+      "scope",
+      'storeKeys.resource(scope, "product", { productUuid })',
+      'storeKeys.resource({ storeUuid: productUuid }, "product", { productUuid })',
+    ],
+    [
+      "Category scope",
+      'storeKeys.resource(scope, "product-categories", { criteria, cursor })',
+      'storeKeys.resource(storeUuid, "product-categories", { criteria, cursor })',
+    ],
+    [
+      "Product key global array",
+      'storeKeys.resource(scope, "product", { productUuid })',
+      '["product", productUuid]',
+    ],
+  ])("rejects actual Product key mutant omitting %s", (_label, anchor, replacement) => {
+    const file = "src/features/products/queries.ts";
+    const source = readFileSync(join(root, file), "utf8");
+    expect(inspectArchitecture(file, source)).toEqual([]);
+    const mutant = source.replace(anchor, replacement);
+    expect(mutant).not.toBe(source);
+    expect(inspectArchitecture(file, mutant).map(({ rule }) => rule)).toContain(
+      "product-query-isolation",
+    );
+  });
+
+  it.each(["publish", "unpublish", "archive", "pricing", "inventory", "variants", "media"])(
+    "rejects adding unapproved Product %s to the actual registry",
+    (suffix) => {
+      const file = "src/lib/backend/contracts.ts";
+      const source = readFileSync(join(root, file), "utf8");
+      const anchor = "/catalog/products/${catalogUuidSchema.parse(input.productUuid)}";
+      const mutant = source.replace(anchor, `${anchor}/${suffix}`);
+      expect(mutant).not.toBe(source);
+      expect(inspectArchitecture(file, mutant).map(({ rule }) => rule)).toContain(
+        "verified-contract-registry",
+      );
+    },
+  );
 
   it("rejects an invented route mutation in the actual activated contract source", () => {
     const file = "src/lib/backend/contracts.ts";

@@ -10,7 +10,9 @@ export type ArchitectureRule =
   | "restricted-image-hosts"
   | "verified-contract-registry"
   | "role-derived-authority"
-  | "uuid-derived-authority";
+  | "uuid-derived-authority"
+  | "tenant-selector-authority"
+  | "product-query-isolation";
 
 export interface ArchitectureViolation {
   rule: ArchitectureRule;
@@ -230,7 +232,9 @@ export function inspectArchitecture(filename: string, source: string): Architect
 
   function inspectModule(module: string, node: ts.Node): void {
     if (
-      /(^|\/)(platform(?:-admin)?|diagnostics?|notification-diagnostics)(\/|$)/i.test(module) ||
+      /(^|\/)(platform(?:-admin)?|storefront|diagnostics?|notification-diagnostics)(\/|$)/i.test(
+        module,
+      ) ||
       /(^|[\/@-])(devtools|analytics|posthog|mixpanel|amplitude|sentry|gtag)([\/@-]|$)/i.test(
         module,
       ) ||
@@ -304,7 +308,7 @@ export function inspectArchitecture(filename: string, source: string): Architect
     }
   }
 
-  // This is the six-contract F2 activation boundary, independent of descriptive evidence text.
+  // F2's six contracts plus exactly three F3-A Merchant reads. Evidence text cannot expand scope.
   const verifiedContracts: Record<string, readonly [string, string]> = {
     csrf: ["GET", "/sanctum/csrf-cookie"],
     login: ["POST", "/api/v1/auth/login"],
@@ -312,6 +316,9 @@ export function inspectArchitecture(filename: string, source: string): Architect
     logout: ["POST", "/api/v1/auth/logout"],
     stores: ["GET", "/api/v1/me/stores?page={value}"],
     context: ["GET", "/api/v1/stores/{value}/context"],
+    products: ["GET", "/api/v1/stores/{value}/catalog/products?{value}"],
+    product: ["GET", "/api/v1/stores/{value}/catalog/products/{value}"],
+    categories: ["GET", "/api/v1/stores/{value}/catalog/categories?{value}"],
   };
 
   function registryEntry(node: ts.ObjectLiteralExpression): string | undefined {
@@ -386,6 +393,7 @@ export function inspectArchitecture(filename: string, source: string): Architect
       literal(method) !== expected[0] ||
       !pathExpression ||
       contractPath(pathExpression) !== expected[1] ||
+      (expected[0] === "GET" && properties.has("body")) ||
       node.properties.some(ts.isSpreadAssignment)
     )
       report("verified-contract-registry", node);
@@ -430,11 +438,91 @@ export function inspectArchitecture(filename: string, source: string): Architect
     )
       return uuidTruthiness(node.arguments[0]);
     const target = expressionPath(node);
-    return !!target && /(?:^|\.)(?:storeUuid|storeId|store_id|store\.id)$/.test(target);
+    return (
+      !!target &&
+      /(?:^|\.)(?:storeUuid|storeId|store_id|store\.id|productUuid|productId|product_id|product\.id|tenantUuid|tenantId|tenant_id)$/.test(
+        target,
+      )
+    );
+  }
+
+  const productResources = new Set(["products", "product", "product-categories"]);
+
+  function objectFields(
+    expression: ts.Expression | undefined,
+  ): Map<string, ts.Expression> | undefined {
+    if (!expression) return undefined;
+    const resolved = resolveExpression(expression);
+    if (!ts.isObjectLiteralExpression(resolved) || resolved.properties.some(ts.isSpreadAssignment))
+      return undefined;
+    const fields = new Map<string, ts.Expression>();
+    for (const property of resolved.properties) {
+      if (ts.isPropertyAssignment(property)) {
+        const name = nameOf(property.name);
+        if (name) fields.set(name, property.initializer);
+      } else if (ts.isShorthandPropertyAssignment(property))
+        fields.set(property.name.text, property.name);
+    }
+    return fields;
+  }
+
+  function inspectProductKeyFactory(node: ts.VariableDeclaration): void {
+    if (!ts.isIdentifier(node.name) || node.name.text !== "productKeys" || !node.initializer)
+      return;
+    const entries = objectFields(node.initializer);
+    if (!entries || entries.size !== 3) {
+      report("product-query-isolation", node);
+      return;
+    }
+    for (const [name, resource, parameters] of [
+      ["list", "products", ["criteria", "cursor"]],
+      ["detail", "product", ["productUuid"]],
+      ["categories", "product-categories", ["criteria", "cursor"]],
+    ] as const) {
+      const entry = entries.get(name);
+      const factory = entry ? resolveExpression(entry) : undefined;
+      if (!factory || !ts.isArrowFunction(factory) || ts.isBlock(factory.body)) {
+        report("product-query-isolation", entry ?? node);
+        continue;
+      }
+      const call = unwrap(factory.body);
+      const firstParameter = factory.parameters[0]?.name;
+      if (
+        !ts.isCallExpression(call) ||
+        expressionPath(call.expression) !== "storeKeys.resource" ||
+        !firstParameter ||
+        !ts.isIdentifier(firstParameter) ||
+        !call.arguments[0] ||
+        !ts.isIdentifier(unwrap(call.arguments[0])) ||
+        call.arguments[0].getText(file) !== firstParameter.text ||
+        literal(call.arguments[1]) !== resource
+      ) {
+        report("product-query-isolation", factory);
+        continue;
+      }
+      const fields = objectFields(call.arguments[2]);
+      if (
+        !fields ||
+        fields.size !== parameters.length ||
+        parameters.some((parameter, index) => {
+          const field = fields.get(parameter);
+          const parameterName = factory.parameters[index + 1]?.name;
+          return (
+            !field ||
+            !parameterName ||
+            !ts.isIdentifier(parameterName) ||
+            !ts.isIdentifier(unwrap(field)) ||
+            field.getText(file) !== parameterName.text
+          );
+        })
+      )
+        report("product-query-isolation", factory);
+    }
   }
 
   visit(file, (node) => {
     if (ts.isObjectLiteralExpression(node)) inspectContract(node);
+    if (ts.isVariableDeclaration(node)) inspectProductKeyFactory(node);
     if (
       ts.isBinaryExpression(node) &&
       [
@@ -502,6 +590,12 @@ export function inspectArchitecture(filename: string, source: string): Architect
       inspectExecutable(node.expression);
       const target = expressionPath(node.expression);
       if (
+        target &&
+        /\.(?:listProducts|loadProduct|listCategories)$/.test(target) &&
+        path !== "src/features/products/queries.ts"
+      )
+        report("product-query-isolation", node);
+      if (
         ts.isCallExpression(node) &&
         (node.expression.kind === ts.SyntaxKind.ImportKeyword || target === "require")
       ) {
@@ -513,6 +607,8 @@ export function inspectArchitecture(filename: string, source: string): Architect
         const value = literal(node.arguments?.[1]);
         if (header?.toLowerCase() === "authorization" || /^Bearer\s/i.test(value ?? ""))
           report("token-authentication", node);
+        if (/^x-(?:store|tenant)(?:-id|-uuid)?$/i.test(header ?? ""))
+          report("tenant-selector-authority", node);
       }
       if (ts.isNewExpression(node) && target === "Headers") {
         const argument = node.arguments?.[0];
@@ -541,6 +637,20 @@ export function inspectArchitecture(filename: string, source: string): Architect
     }
     if (ts.isPropertyAssignment(node)) {
       const name = nameOf(node.name);
+      if (
+        name &&
+        (/^(?:store_id|tenant_id)$/.test(name) || /^x-(?:store|tenant)(?:-id|-uuid)?$/i.test(name))
+      )
+        report("tenant-selector-authority", node);
+      if (name === "queryKey") {
+        const key = resolveExpression(node.initializer);
+        if (
+          ts.isArrayLiteralExpression(key) &&
+          (/(^|\/)src\/features\/products\//.test(path) ||
+            key.elements.some((item) => productResources.has(literal(item) ?? "")))
+        )
+          report("product-query-isolation", node);
+      }
       if (name?.toLowerCase() === "authorization") report("token-authentication", node);
       if (name === "dangerouslySetInnerHTML") report("unsafe-html", node);
       if (imageConfiguration) inspectImagePatterns(node);

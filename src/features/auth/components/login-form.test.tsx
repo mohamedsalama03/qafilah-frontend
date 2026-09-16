@@ -13,6 +13,9 @@ vi.mock("next/navigation", () => ({ useRouter: () => router }));
 
 function apiFixture(): MerchantApi {
   return {
+    listProducts: vi.fn(),
+    loadProduct: vi.fn(),
+    listCategories: vi.fn(),
     authAdapter: {
       loadIdentity: vi.fn(async () => {
         throw new ApiError("unauthenticated");
@@ -138,7 +141,7 @@ describe("implemented post-login destinations", () => {
     "/design-system",
     "/api/v1/me",
     "/stores/invalid",
-    "/stores/11111111-1111-4111-8111-111111111111/products",
+    "/stores/11111111-1111-4111-8111-111111111111/products/create",
   ])("rejects %s", (input) => {
     expect(loginDestination(input)).toBe("/");
   });

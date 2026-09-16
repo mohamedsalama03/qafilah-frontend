@@ -3,7 +3,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { ChevronsUpDown, Store, X } from "lucide-react";
 import { useId, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/error-state";
 import { useStores } from "./store-provider";
@@ -12,6 +12,7 @@ import { StoreList } from "./store-list";
 export function StoreSwitcher() {
   const { controller, state } = useStores();
   const router = useRouter();
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const id = useId();
@@ -78,7 +79,9 @@ export function StoreSwitcher() {
                 onSelect={(uuid) => {
                   void controller.select(uuid);
                   setOpen(false);
-                  router.push(`/stores/${uuid}`);
+                  router.push(
+                    `/stores/${uuid}${/^\/stores\/[^/]+\/products(?:\/|$)/.test(pathname) ? "/products" : ""}`,
+                  );
                 }}
               />
             )}

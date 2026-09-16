@@ -287,14 +287,25 @@ export function createStoreController(options: StoreControllerOptions) {
         )
           throw new ApiError("invalid-response");
         const verified = freezeContext(context);
-        options.queryClient.setQueryData(storeKeys.resource(requestScope, "context"), verified);
+        // Revalidated grants are an authority boundary for every operational resource.
+        // Revoke cached data and in-flight reads before publishing changed capabilities.
+        const authorityChanged =
+          previous &&
+          (previous.membership.id !== verified.membership.id ||
+            previous.role.id !== verified.role.id ||
+            [...previous.permissions].sort().join("\n") !==
+              [...verified.permissions].sort().join("\n"));
+        const verifiedScope = authorityChanged
+          ? options.scope.setScope({ principalId, storeUuid: uuid })
+          : requestScope;
+        options.queryClient.setQueryData(storeKeys.resource(verifiedScope, "context"), verified);
         update({
           ...state,
           selectedUuid: uuid,
           contextStatus: "ready",
           context: verified,
           contextError: null,
-          scope: requestScope,
+          scope: verifiedScope,
           refreshing: false,
         });
       } catch (error) {

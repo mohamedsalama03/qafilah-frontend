@@ -1,5 +1,11 @@
 import { createApiClient } from "../api/client";
 import { ApiError } from "../api/errors";
+import type {
+  CategoryListInput,
+  ProductListInput,
+  ProductReadInput,
+} from "../../features/products/contracts";
+import { normalizeCategoryCriteria, normalizeProductCriteria } from "../../features/products/model";
 import type { AuthAdapter } from "../auth/controller";
 import { parseStoreUuid } from "../query/keys";
 import {
@@ -150,6 +156,45 @@ export function createMerchantApi(options: MerchantApiOptions) {
       }
       const result = await api.request(merchantContracts.context, storeUuid, { signal });
       if (result.store.id.toLowerCase() !== storeUuid.toLowerCase())
+        throw new ApiError("invalid-response");
+      return result;
+    },
+    async listProducts(input: ProductListInput, signal?: AbortSignal) {
+      let requestInput: ProductListInput;
+      try {
+        requestInput = { ...input, criteria: normalizeProductCriteria(input.criteria) };
+        merchantContracts.products.path(requestInput);
+      } catch {
+        throw new ApiError("configuration");
+      }
+      const result = await api.request(merchantContracts.products, requestInput, { signal });
+      if (result.pagination.per_page !== requestInput.criteria!.per_page)
+        throw new ApiError("invalid-response");
+      return result;
+    },
+    async loadProduct(input: ProductReadInput, signal?: AbortSignal) {
+      const requestInput = { ...input };
+      try {
+        merchantContracts.product.path(requestInput);
+      } catch {
+        throw new ApiError("configuration");
+      }
+      const result = await api.request(merchantContracts.product, requestInput, { signal });
+      // Product UUID limits syntax and response identity; verified Store context supplies authority.
+      if (result.id.toLowerCase() !== requestInput.productUuid.toLowerCase())
+        throw new ApiError("invalid-response");
+      return result;
+    },
+    async listCategories(input: CategoryListInput, signal?: AbortSignal) {
+      let requestInput: CategoryListInput;
+      try {
+        requestInput = { ...input, criteria: normalizeCategoryCriteria(input.criteria) };
+        merchantContracts.categories.path(requestInput);
+      } catch {
+        throw new ApiError("configuration");
+      }
+      const result = await api.request(merchantContracts.categories, requestInput, { signal });
+      if (result.pagination.per_page !== requestInput.criteria!.per_page)
         throw new ApiError("invalid-response");
       return result;
     },

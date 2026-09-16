@@ -232,13 +232,35 @@ describe("principal-owned Merchant Store lifecycle", () => {
     expect(controller.getSnapshot()).toMatchObject({ contextStatus: "ready", refreshing: true });
     expect(controller.getSnapshot().scope).toBe(previous.scope);
     expect(controller.getSnapshot().context).toBe(previous.context);
-    refresh.resolve(context(storeA, []));
+    refresh.resolve(context());
     await recheck;
-    expect(controller.getSnapshot().context?.permissions).toEqual([]);
+    expect(controller.getSnapshot().context?.permissions).toEqual(previous.context?.permissions);
     expect(controller.getSnapshot().scope).toBe(previous.scope);
     expect(queryClient.getQueryData(key)).toBe("unsaved note");
     work.resolve("still current");
     await expect(running).resolves.toBe("still current");
+    controller.dispose();
+  });
+
+  it("revokes operational caches and pending reads before publishing changed permissions", async () => {
+    const loadStoreContext = vi
+      .fn<StoreApi["loadStoreContext"]>()
+      .mockResolvedValueOnce(context())
+      .mockResolvedValueOnce(context(storeA, []));
+    const { controller, queryClient, scope } = setup({ loadStoreContext });
+    await controller.select(storeA);
+    const previous = controller.getSnapshot().scope!;
+    const key = storeKeys.resource(previous, "products");
+    queryClient.setQueryData(key, "private Product state");
+    const work = deferred<string>();
+    const running = scope.run(previous, () => work.promise);
+    const cancelled = expect(running).rejects.toMatchObject({ kind: "cancelled" });
+    await controller.revalidate();
+    await cancelled;
+    expect(controller.getSnapshot().scope).not.toBe(previous);
+    expect(controller.getSnapshot().context?.permissions).toEqual([]);
+    expect(queryClient.getQueryData(key)).toBeUndefined();
+    work.resolve("late private response");
     controller.dispose();
   });
 

@@ -27,6 +27,9 @@ function context(uuid = uuidA, permissions = ["products.view"]): MerchantStoreCo
 }
 function apiFixture(stores = [storeA, storeB]): MerchantApi {
   return {
+    listProducts: vi.fn(),
+    loadProduct: vi.fn(),
+    listCategories: vi.fn(),
     authAdapter: {
       loadIdentity: vi.fn(async () => ({
         principalId: "principal-a",

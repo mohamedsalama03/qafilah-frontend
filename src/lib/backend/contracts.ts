@@ -1,4 +1,18 @@
 import { z } from "zod";
+import {
+  categoryQueryString,
+  decodeCategoryPage,
+  decodeMerchantProduct,
+  decodeProductPage,
+  productQueryString,
+  type CategoryListInput,
+  type CategoryPage,
+  type MerchantProduct,
+  type ProductListInput,
+  type ProductPage,
+  type ProductReadInput,
+} from "../../features/products/contracts";
+import { catalogUuidSchema } from "../../features/products/model";
 import { hasAsciiControlCharacters } from "../api/control-characters";
 import { readLaravelValidationErrors } from "../api/errors";
 import type { ContractEvidence, EndpointContract, SafeErrorDetails } from "../api/types";
@@ -172,6 +186,48 @@ export const merchantContracts = {
     path: (storeUuid: string) => `/api/v1/stores/${uuid.parse(storeUuid)}/context`,
     decode: (payload: unknown): MerchantStoreContext => envelope(storeContext).parse(payload).data,
   } satisfies EndpointContract<string, MerchantStoreContext>,
+  products: {
+    evidence: evidence(
+      "routes/api.php:404; Catalog ListMerchantProductsRequest/ListMerchantProductsQuery/MerchantProductCollection/MerchantProductResource; CatalogApiTest/CatalogDiscoveryApiTest",
+    ),
+    method: "GET",
+    path: (input: ProductListInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products?${productQueryString(input.criteria, input.cursor)}`,
+    decode: decodeProductPage,
+    decodeError: (payload: unknown) =>
+      validation(payload, [
+        "status",
+        "category",
+        "q",
+        "sort",
+        "created_from",
+        "created_to",
+        "updated_from",
+        "updated_to",
+        "per_page",
+        "cursor",
+      ]),
+  } satisfies EndpointContract<ProductListInput, ProductPage>,
+  product: {
+    evidence: evidence(
+      "routes/api.php:408; Catalog MerchantProductController/FindMerchantProductQuery/MerchantProductResource/CatalogRouteBinding; CatalogApiTest/CatalogCommercialStateApiTest",
+    ),
+    method: "GET",
+    path: (input: ProductReadInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}`,
+    decode: decodeMerchantProduct,
+  } satisfies EndpointContract<ProductReadInput, MerchantProduct>,
+  categories: {
+    evidence: evidence(
+      "routes/api.php:469; Catalog ListMerchantCategoriesRequest/ListMerchantCategoriesQuery/MerchantCategoryCollection/MerchantCategoryResource; CatalogApiTest/CatalogDiscoveryApiTest",
+    ),
+    method: "GET",
+    path: (input: CategoryListInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/categories?${categoryQueryString(input.criteria, input.cursor)}`,
+    decode: decodeCategoryPage,
+    decodeError: (payload: unknown) =>
+      validation(payload, ["status", "q", "sort", "per_page", "cursor"]),
+  } satisfies EndpointContract<CategoryListInput, CategoryPage>,
 } as const;
 
 export const csrfEvidence = evidence(

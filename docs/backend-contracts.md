@@ -1,5 +1,23 @@
 # Backend contract access and integration register
 
+## F3-A current contract register
+
+F3-A extends the six certified F2 contracts with exactly three Merchant GET contracts, using frontend baseline `c0c7234a602c133d847b6722b95d7d18fc525e1b` and unchanged backend authority `6614690a3b24b39f45c7c1b9ed85c20ecb22cbbf`. The current registry therefore contains **nine contracts**, with **zero Product mutation contracts**. The sections below retain the historical F2/F1 record; they do not describe the current integration status.
+
+| Method/path                                             | Permission                        | Input and result                                                                                                                                                               |
+| ------------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GET `/api/v1/stores/{store}/catalog/products`           | `products.view`                   | Name-prefix `q`, status, Category UUID, paired creation/update timestamps, sort, per_page and opaque cursor; Product array with cursor pagination and effective creation range |
+| GET `/api/v1/stores/{store}/catalog/products/{product}` | `products.view`                   | Store and Product UUID route syntax only; Product Resource                                                                                                                     |
+| GET `/api/v1/stores/{store}/catalog/categories`         | `categories.view`, conditional UI | Category cursor lookup; never probed without the current grant                                                                                                                 |
+
+Authoritative source: `routes/api.php`, Catalog Merchant controllers/requests/resources, `ListMerchantProductsQuery`, `CatalogCursorCodec`, `ProductCommercialStateLoader`, Product policy and tenant binding. Product list defaults to 25 (maximum 50) and the previous 366 days of creation; explicit ranges are paired and bounded to 366 days. Search is normalized display-name prefix, 2–80 Unicode characters. Sorts are `newest`, `oldest`, `name_asc`, `name_desc`. Cursor responses have next/previous tokens, no numeric page or total count. The effective creation range is pinned in cursors, without a transactional multi-request snapshot.
+
+Product DTOs contain only the published Resource fields. Descriptions remain escaped plain text. Money is an integer count of minor units: LYD exponent 3, USD/EUR exponent 2. Formatting splits integer digits without floating-point conversion. Variant minimum price and aggregate availability can refer to different active Variants; Product quantity remains null for Variant Products.
+
+Product queries reuse the principal/Store/revision scope, central verified transport and normalized errors. A changed permission set, Role identity or Membership identity during Store revalidation revokes operational caches and pending reads before new authority is published. An unchanged authority refresh preserves the existing scope. Product 404 is resource-local; 401/419 retain the global F2 lifecycle. No Storefront/Platform API, client tenant selector, auth token persistence, or Product mutation is activated.
+
+Implementation and verification evidence: `F3-report.md`, `F3-integration.md`, the permanent Product unit/architecture tests, `tests/integration/products.spec.ts`, and `tests/production/products.spec.ts`.
+
 ## F2 published contract authority
 
 Frontend baseline: `473b44c1c0bc0627942866c31b11aac4d4c35442`. Backend source: `git@github.com:mohamedsalama03/qafila-e-commerce.git`, main at `6614690a3b24b39f45c7c1b9ed85c20ecb22cbbf`. Both were independently fetched, clean and at published parity before F2 implementation. The backend checkout is read-only.
