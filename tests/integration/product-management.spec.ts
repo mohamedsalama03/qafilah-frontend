@@ -485,6 +485,7 @@ test("real publish unpublish archive use dedicated actions and invalid repeated 
   const publish = mutationResponse(page, store, "POST", product.id, "publish");
   await page.getByRole("button", { name: "Publish", exact: true }).click();
   expect((await (await publish).json()).data.status).toBe("published");
+  await page.getByRole("button", { name: "Review product actions", exact: true }).click();
   await expect(page.getByRole("button", { name: "Unpublish", exact: true })).toBeVisible();
   expect((await direct(page, apiPath(store, product.id, "publish"), "POST")).status).toBe(422);
   const unpublish = mutationResponse(page, store, "POST", product.id, "unpublish");
@@ -494,6 +495,7 @@ test("real publish unpublish archive use dedicated actions and invalid repeated 
     published_at: null,
   });
   const archived = mutationResponse(page, store, "POST", product.id, "archive");
+  await page.getByRole("button", { name: "Review product actions", exact: true }).click();
   await archive(page);
   expect((await (await archived).json()).data.status).toBe("archived");
   await expect(page.locator("body")).toContainText(/archived/i);

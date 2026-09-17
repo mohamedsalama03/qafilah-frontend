@@ -177,19 +177,31 @@ function valuesFor(product?: MerchantProduct) {
   };
 }
 
-function ProductForm({ product }: { product?: MerchantProduct }) {
+function CreateProductForm() {
+  const mutation = useProductMutation();
+  return <ProductFormFields key={mutation.state.slot} mutation={mutation} />;
+}
+
+function ProductFormFields({
+  product,
+  mutation,
+}: {
+  product?: MerchantProduct;
+  mutation: ReturnType<typeof useProductMutation>;
+}) {
   const { state } = useStores();
   const router = useRouter();
-  const mutation = useProductMutation(product?.id);
   const [source, setSource] = useState(product);
   const [values, setValues] = useState(() => valuesFor(product));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [validationAttempt, setValidationAttempt] = useState(0);
   const [notice, setNotice] = useState("");
-  const [created, setCreated] = useState<MerchantProduct | null>(null);
   const form = useRef<HTMLFormElement>(null);
   const dirty = JSON.stringify(values) !== JSON.stringify(valuesFor(source));
-  const completed = useUnsavedProductChanges(dirty, mutation.isPending);
+  const completed = useUnsavedProductChanges(
+    dirty,
+    mutation.isPending && mutation.state.status !== "reviewing",
+  );
   const href = `/stores/${state.scope!.storeUuid}/products`;
   const categoryAccess = state.context!.permissions.includes("categories.view");
   const canView = state.context!.permissions.includes("products.view");
@@ -257,10 +269,7 @@ function ProductForm({ product }: { product?: MerchantProduct }) {
       if (canView) {
         completed();
         router.push(`${href}/${result.id}`);
-      } else {
-        setCreated(result);
-        setValues(valuesFor());
-      }
+      } else completed();
     }
   }
   async function reconcile() {
@@ -289,22 +298,69 @@ function ProductForm({ product }: { product?: MerchantProduct }) {
         </Link>
       </>
     );
-  if (created)
+  if (mutation.state.status === "success" || mutation.state.status === "reviewing")
     return (
       <>
-        <PageHeader title="Product created" description={`${created.name} was saved as a draft.`} />
+        <PageHeader
+          title={
+            create
+              ? "Product created"
+              : mutation.state.action === "update"
+                ? "Product saved"
+                : "Product updated"
+          }
+          description={
+            create
+              ? `${mutation.state.product!.name} was saved as a draft.`
+              : "Your changes have been saved."
+          }
+        />
         <p role="status" className="mb-5 text-sm text-text-muted">
-          Your access allows creating products. Viewing or editing this product requires additional
-          access.
+          {create
+            ? canView
+              ? "This completed submission cannot be sent again. View the product or start a fresh blank product."
+              : "Your access allows creating products. Viewing or editing this product requires additional access."
+            : "The previous change is complete. Start a new edit to review the latest details before making another change."}
         </p>
         <div className="flex flex-wrap gap-2">
-          <Button variant="primary" onClick={() => setCreated(null)}>
-            Create another product
-          </Button>
-          <Link href={returnHref} prefetch={false} className={buttonStyles()}>
-            Back to overview
+          {create ? (
+            <Button
+              variant="primary"
+              onClick={() => {
+                if (mutation.startAnotherCreate()) router.replace(`${href}/new`);
+              }}
+            >
+              Create another product
+            </Button>
+          ) : (
+            <Button
+              pending={mutation.state.status === "reviewing"}
+              pendingLabel="Reviewing…"
+              onClick={() => {
+                // This explicit navigation supersedes any earlier detail transition.
+                // Do not navigate after the review: the merchant may leave while it runs.
+                router.replace(`${href}/${mutation.state.product!.id}/edit`);
+                void mutation.reviewSuccess();
+              }}
+            >
+              Start a new edit
+            </Button>
+          )}
+          <Link
+            href={canView ? `${href}/${mutation.state.product!.id}` : returnHref}
+            prefetch={false}
+            className={buttonStyles()}
+          >
+            {canView ? "View product" : "Back to overview"}
           </Link>
         </div>
+        {mutation.state.error && (
+          <div className="mt-4">
+            <FormError
+              message={`The change was saved, but the latest product could not be reviewed. ${mutation.state.error.message}`}
+            />
+          </div>
+        )}
       </>
     );
   return (
@@ -510,6 +566,9 @@ function ProductForm({ product }: { product?: MerchantProduct }) {
 }
 
 function EditProduct({ productUuid }: { productUuid: string }) {
+  // Read the query in the same render that renews the slot. A separate child can
+  // otherwise remount with old props before the query's notification is delivered.
+  const mutation = useProductMutation(productUuid);
   const query = useProduct(productUuid, { refetchOnWindowFocus: false, refetchOnReconnect: false });
   if (query.error)
     return (
@@ -525,13 +584,13 @@ function EditProduct({ productUuid }: { productUuid: string }) {
       </>
     );
   if (!query.data || query.isFetching) return <ProductLoading detail />;
-  return <ProductForm product={query.data} />;
+  return <ProductFormFields key={mutation.state.slot} mutation={mutation} product={query.data} />;
 }
 
 export function CreateProductScreen() {
   return (
     <ManagementAccess create>
-      <ProductForm />
+      <CreateProductForm />
     </ManagementAccess>
   );
 }

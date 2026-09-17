@@ -19,7 +19,10 @@ export type ProductMutationCommand =
   | { action: "publish" | "unpublish" | "archive" };
 
 export interface ProductMutationState {
-  readonly status: "idle" | "pending" | "success" | "error" | "unknown" | "reconciling";
+  readonly status:
+    "idle" | "pending" | "success" | "error" | "unknown" | "reconciling" | "reviewing";
+  /** Local interaction identity only; never sent as a backend concurrency precondition. */
+  readonly slot: number;
   readonly action: ProductMutationCommand["action"] | null;
   readonly error: ApiError | null;
   readonly product: MerchantProduct | null;
@@ -36,6 +39,7 @@ interface ProductMutationOptions {
 
 const initialState: ProductMutationState = Object.freeze({
   status: "idle",
+  slot: 0,
   action: null,
   error: null,
   product: null,
@@ -51,6 +55,10 @@ export function createProductMutationController(options: ProductMutationOptions)
   function update(next: ProductMutationState) {
     state = Object.freeze(next);
     listeners.forEach((listener) => listener());
+  }
+
+  function freshSlot(product: MerchantProduct | null = null) {
+    update({ ...initialState, slot: state.slot + 1, product });
   }
 
   function assertAccess(permission = "products.view") {
@@ -102,9 +110,14 @@ export function createProductMutationController(options: ProductMutationOptions)
         listeners.delete(listener);
       };
     },
-    execute(command: ProductMutationCommand): Promise<MerchantProduct | null> {
+    execute(
+      command: ProductMutationCommand,
+      expectedSlot = state.slot,
+    ): Promise<MerchantProduct | null> {
+      if (expectedSlot !== state.slot) return Promise.resolve(null);
       if (pending) return pending;
-      if (reconciliation || state.status === "unknown") return Promise.resolve(null);
+      if (reconciliation || state.status === "unknown" || state.status === "success")
+        return Promise.resolve(null);
       const task = Promise.resolve().then(async () => {
         let invoked = false;
         try {
@@ -146,7 +159,13 @@ export function createProductMutationController(options: ProductMutationOptions)
           if (stores.getSnapshot().context?.permissions.includes("products.view"))
             await reconcileCache(product);
           assertAccess(productMutationPermissions[command.action]);
-          update({ status: "success", action: command.action, error: null, product });
+          update({
+            status: "success",
+            slot: state.slot,
+            action: command.action,
+            error: null,
+            product,
+          });
           return product;
         } catch (error) {
           // Cancellation after dispatch does not prove rollback. The old screen has
@@ -157,6 +176,7 @@ export function createProductMutationController(options: ProductMutationOptions)
             normalized.mutationOutcome === "unknown" || (invoked && !(error instanceof ApiError));
           update({
             status: unknown ? "unknown" : "error",
+            slot: state.slot,
             action: command.action,
             error: normalized,
             product: null,
@@ -168,13 +188,20 @@ export function createProductMutationController(options: ProductMutationOptions)
       // Install the latch before notifying React: even synchronous repeated events
       // receive this same operation, never a second request.
       pending = task;
-      update({ status: "pending", action: command.action, error: null, product: null });
+      update({
+        status: "pending",
+        slot: state.slot,
+        action: command.action,
+        error: null,
+        product: null,
+      });
       void task.finally(() => {
         if (pending === task) pending = null;
       });
       return task;
     },
-    reconcile(): Promise<MerchantProduct | ProductPage | null> {
+    reconcile(expectedSlot = state.slot): Promise<MerchantProduct | ProductPage | null> {
+      if (expectedSlot !== state.slot) return Promise.resolve(null);
       if (reconciliation) return reconciliation;
       if (pending || state.status !== "unknown") return Promise.resolve(null);
       const previous = state;
@@ -200,7 +227,7 @@ export function createProductMutationController(options: ProductMutationOptions)
           } else {
             await reconcileCache(result);
             assertAccess();
-            update({ status: "idle", action: null, error: null, product: result });
+            freshSlot(result);
           }
           return result;
         } catch (error) {
@@ -218,9 +245,68 @@ export function createProductMutationController(options: ProductMutationOptions)
       });
       return task;
     },
-    /** Separate user intent after reviewing the list; never resends the previous input. */
-    startSeparateCreate(): boolean {
+    /** A distinct user-requested read can arm another Product action after confirmed success. */
+    reviewSuccess(expectedSlot = state.slot): Promise<MerchantProduct | null> {
       if (
+        expectedSlot !== state.slot ||
+        pending ||
+        reconciliation ||
+        !productUuid ||
+        state.status !== "success" ||
+        state.product?.status === "archived"
+      )
+        return Promise.resolve(null);
+      const confirmed = state;
+      const task = Promise.resolve().then(async () => {
+        try {
+          assertAccess();
+          const product = await session.scope.run(scope, (signal) =>
+            api!.loadProduct({ storeUuid: scope.storeUuid, productUuid }, signal),
+          );
+          assertAccess();
+          await reconcileCache(product);
+          assertAccess();
+          freshSlot(product);
+          return product;
+        } catch (error) {
+          if (!isCurrent()) return null;
+          const normalized = normalizeUnexpectedError(error);
+          // A failed review cannot erase known write success or re-arm its completed input.
+          update({ ...confirmed, error: normalized });
+          handleAuthorityError(normalized);
+          return null;
+        }
+      });
+      reconciliation = task;
+      update({ ...confirmed, status: "reviewing", error: null });
+      void task.finally(() => {
+        if (reconciliation === task) reconciliation = null;
+      });
+      return task;
+    },
+    /** Explicit blank-form reset after a confirmed create; never dispatches a write. */
+    startAnotherCreate(expectedSlot = state.slot): boolean {
+      if (
+        expectedSlot !== state.slot ||
+        productUuid ||
+        pending ||
+        reconciliation ||
+        state.status !== "success" ||
+        state.action !== "create"
+      )
+        return false;
+      try {
+        assertAccess(productMutationPermissions.create);
+      } catch {
+        return false;
+      }
+      freshSlot();
+      return true;
+    },
+    /** Separate user intent after reviewing the list; never resends the previous input. */
+    startSeparateCreate(expectedSlot = state.slot): boolean {
+      if (
+        expectedSlot !== state.slot ||
         productUuid ||
         pending ||
         reconciliation ||
@@ -233,7 +319,7 @@ export function createProductMutationController(options: ProductMutationOptions)
       } catch {
         return false;
       }
-      update(initialState);
+      freshSlot();
       return true;
     },
   };
@@ -284,12 +370,21 @@ export function useProductMutation(productUuid?: string) {
   );
   return {
     state,
-    isPending: state.status === "pending" || state.status === "reconciling",
+    isPending:
+      state.status === "pending" || state.status === "reconciling" || state.status === "reviewing",
     isBlocked:
-      state.status === "pending" || state.status === "reconciling" || state.status === "unknown",
-    execute: controller.execute,
-    reconcile: controller.reconcile,
+      state.status === "pending" ||
+      state.status === "reconciling" ||
+      state.status === "unknown" ||
+      state.status === "success" ||
+      state.status === "reviewing",
+    // Each render's handlers retain their slot: a discarded form/action cannot write
+    // through a controller that a later deliberate action has already reset.
+    execute: (command: ProductMutationCommand) => controller.execute(command, state.slot),
+    reviewSuccess: () => controller.reviewSuccess(state.slot),
+    startAnotherCreate: () => controller.startAnotherCreate(state.slot),
+    reconcile: () => controller.reconcile(state.slot),
     canStartSeparateCreate: !productUuid && state.status === "unknown" && !!state.creationReviewed,
-    startSeparateCreate: controller.startSeparateCreate,
+    startSeparateCreate: () => controller.startSeparateCreate(state.slot),
   };
 }
