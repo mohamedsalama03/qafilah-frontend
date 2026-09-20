@@ -26,6 +26,8 @@ export interface ProductMutationState {
   readonly action: ProductMutationCommand["action"] | null;
   readonly error: ApiError | null;
   readonly product: MerchantProduct | null;
+  /** Presentation of the explicit renewal event; retained across keyed form remounts. */
+  readonly guidance?: "product-loaded" | "blank-product";
   readonly creationReviewed?: boolean;
 }
 
@@ -58,7 +60,13 @@ export function createProductMutationController(options: ProductMutationOptions)
   }
 
   function freshSlot(product: MerchantProduct | null = null) {
-    update({ ...initialState, slot: state.slot + 1, product });
+    // Every renewal follows an explicit server review or a separate blank creation.
+    update({
+      ...initialState,
+      slot: state.slot + 1,
+      product,
+      guidance: product ? "product-loaded" : "blank-product",
+    });
   }
 
   function assertAccess(permission = "products.view") {

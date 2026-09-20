@@ -191,7 +191,7 @@ function ProductFormFields({
 }) {
   const { state } = useStores();
   const router = useRouter();
-  const [source, setSource] = useState(product);
+  const [source] = useState(product);
   const [values, setValues] = useState(() => valuesFor(product));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [validationAttempt, setValidationAttempt] = useState(0);
@@ -278,17 +278,13 @@ function ProductFormFields({
     if ("products" in result) {
       completed();
       router.push(href);
-    } else {
-      setSource(result);
-      setValues(valuesFor(result));
-      setErrors({});
-      setNotice("Latest product loaded. Review it before making another change.");
     }
   }
   if (source?.status === "archived")
     return (
       <>
         <PageHeader title="Edit product" />
+        <MutationFeedback mutation={mutation} />
         <ErrorState
           title="This product is archived"
           description="Archived products cannot be edited or restored."
@@ -387,11 +383,7 @@ function ProductFormFields({
           create={create}
           canReview={canView}
           startSeparateCreate={() => {
-            if (mutation.startSeparateCreate()) {
-              setValues(valuesFor());
-              setErrors({});
-              setNotice("A new blank product form is ready. No earlier request has been repeated.");
-            }
+            mutation.startSeparateCreate();
           }}
           reconcile={() => {
             void reconcile();

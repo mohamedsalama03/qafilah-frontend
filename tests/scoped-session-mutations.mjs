@@ -13,7 +13,9 @@ const protectedPaths = [
   "src/features/products/queries.ts",
   "src/features/auth/components/scoped-read-revalidation.test.tsx",
 ];
-const outputDirectory = join(root, "artifacts/f3a-l1/mutations");
+const outputDirectory = process.env.QAFILAH_MUTATION_ARTIFACT_ROOT
+  ? resolve(root, process.env.QAFILAH_MUTATION_ARTIFACT_ROOT, "scoped-session-mutations")
+  : join(root, "artifacts/f3a-l1/mutations");
 export const scopedSessionTestPattern = "settles persistent|also bounds";
 
 function replaceOnce(source, before, after) {

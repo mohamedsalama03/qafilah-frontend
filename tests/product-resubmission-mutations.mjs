@@ -15,8 +15,14 @@ const testPaths = [
   "src/features/products/components/product-resubmission.test.tsx",
   "src/features/products/product-resubmission.test.ts",
 ];
-const protectedPaths = [...resubmissionSources, ...testPaths];
-const outputDirectory = join(root, "artifacts/f3b-remediation/resubmission-mutations");
+const protectedPaths = [
+  ...resubmissionSources,
+  "src/features/products/components/mutation-feedback.tsx",
+  ...testPaths,
+];
+const outputDirectory = process.env.QAFILAH_MUTATION_ARTIFACT_ROOT
+  ? resolve(root, process.env.QAFILAH_MUTATION_ARTIFACT_ROOT, "resubmission-mutations")
+  : join(root, "artifacts/f3b-remediation/resubmission-mutations");
 const boundary = "(?:publish|unpublish|create|save) (?:click|Enter) at 120 ms";
 const terminal = "terminal .* controller refuses";
 const retained = "retained .* hook handlers";

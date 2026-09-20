@@ -18,6 +18,14 @@ export function MutationFeedback({
   canReview?: boolean;
 }) {
   const { state } = mutation;
+  if (state.status === "idle" && state.guidance)
+    return (
+      <p role="status" aria-live="polite" aria-atomic="true" className="text-sm text-text-muted">
+        {state.guidance === "product-loaded"
+          ? "The latest product was loaded from the server. Review it before making another change."
+          : "A new blank product form is ready. No earlier request has been repeated."}
+      </p>
+    );
   if (state.status === "unknown" || state.status === "reconciling")
     return (
       <div
