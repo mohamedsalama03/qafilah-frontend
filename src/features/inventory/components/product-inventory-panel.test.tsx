@@ -155,13 +155,33 @@ describe("Product inventory presentation", () => {
 
   it("preserves confirmed success when the Product refresh fails", () => {
     const mutation = setup(4, undefined, "success");
-    render(<ProductInventoryPanel product={product} productReadUnavailable />);
+    render(<ProductInventoryPanel product={product} productReadFailed />);
     expect(screen.getByRole("status")).toHaveTextContent("Quantity saved.");
     expect(screen.getByText(/latest product details could not be confirmed/)).toBeVisible();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Change quantity" }));
     expect(mutation.reviewSuccess).toHaveBeenCalledOnce();
     expect(mutation.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps confirmed success truthful while Product refresh is pending and then completes", () => {
+    setup(4, undefined, "success");
+    const view = render(<ProductInventoryPanel product={product} productReadPending />);
+    expect(screen.getByRole("status")).toHaveTextContent("Quantity saved.");
+    expect(screen.queryByText(/latest product details could not be confirmed/)).toBeNull();
+    view.rerender(<ProductInventoryPanel product={product} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Quantity saved.");
+    expect(screen.queryByText(/latest product details could not be confirmed/)).toBeNull();
+  });
+
+  it("keeps an ordinary quantity editor disabled while the Product read is pending", () => {
+    const mutation = setup(4);
+    render(<ProductInventoryPanel product={product} productReadPending />);
+    expect(screen.getByRole("textbox", { name: "Quantity" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Set quantity" })).toBeDisabled();
+    fireEvent.submit(screen.getByRole("form", { name: "Set inventory quantity" }));
+    expect(mutation.execute).not.toHaveBeenCalled();
+    expect(screen.queryByText(/latest product details could not be confirmed/)).toBeNull();
   });
 
   it("renders normalized query errors without backend internals", () => {

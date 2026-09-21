@@ -33,7 +33,7 @@ function QuantityForm({
     mutation.state.status === "error" ? mutation.state.error?.fieldErrors.quantity?.[0] : undefined;
   useEffect(() => {
     if (serverError) input.current?.focus();
-  }, [serverError]);
+  }, [serverError, mutation.state.status, mutation.state.slot]);
   return (
     <form
       aria-label="Set inventory quantity"
@@ -93,10 +93,12 @@ function QuantityForm({
 
 function SimpleProductInventoryPanel({
   product,
-  productReadUnavailable,
+  productReadPending,
+  productReadFailed,
 }: {
   product: MerchantProduct;
-  productReadUnavailable: boolean;
+  productReadPending: boolean;
+  productReadFailed: boolean;
 }) {
   const { state: stores } = useStores();
   const query = useProductInventory(product.id);
@@ -111,10 +113,19 @@ function SimpleProductInventoryPanel({
     currentProduct.status !== "archived";
   const unknown = state.status === "unknown" || state.status === "reconciling";
   const confirmed = state.status === "success" || state.status === "reviewing";
+  const quantityError =
+    state.status === "error" ? state.error?.fieldErrors.quantity?.[0] : undefined;
   useEffect(() => {
-    if (state.status === "success" || state.status === "unknown" || state.guidance)
+    // An actionable field error takes priority over general feedback focus.
+    if (quantityError && canEdit) return;
+    if (
+      state.status === "success" ||
+      state.status === "unknown" ||
+      state.status === "error" ||
+      (state.status === "idle" && state.guidance)
+    )
       feedback.current?.focus();
-  }, [state.status, state.guidance, state.slot]);
+  }, [quantityError, canEdit, state.status, state.guidance, state.slot]);
   return (
     <section
       aria-labelledby="product-inventory-heading"
@@ -183,7 +194,7 @@ function SimpleProductInventoryPanel({
             <p role="status" className="font-medium">
               Quantity saved.
             </p>
-            {(state.refreshError || productReadUnavailable) && (
+            {(state.refreshError || productReadFailed) && (
               <p className="max-w-prose text-text-muted">
                 The quantity was saved, but the latest product details could not be confirmed yet.
                 Review current inventory before making another change.
@@ -217,7 +228,7 @@ function SimpleProductInventoryPanel({
           key={state.slot}
           inventory={inventory}
           mutation={mutation}
-          disabled={productReadUnavailable || query.isFetching || !!query.error}
+          disabled={productReadPending || productReadFailed || query.isFetching || !!query.error}
         />
       )}
       {currentProduct.status === "archived" ? (
@@ -233,10 +244,12 @@ function SimpleProductInventoryPanel({
 
 export function ProductInventoryPanel({
   product,
-  productReadUnavailable = false,
+  productReadPending = false,
+  productReadFailed = false,
 }: {
   product: MerchantProduct;
-  productReadUnavailable?: boolean;
+  productReadPending?: boolean;
+  productReadFailed?: boolean;
 }) {
   const { state } = useStores();
   if (product.type !== "simple" || !state.context?.permissions.includes("products.view"))
@@ -244,7 +257,8 @@ export function ProductInventoryPanel({
   return (
     <SimpleProductInventoryPanel
       product={product}
-      productReadUnavailable={productReadUnavailable}
+      productReadPending={productReadPending}
+      productReadFailed={productReadFailed}
     />
   );
 }

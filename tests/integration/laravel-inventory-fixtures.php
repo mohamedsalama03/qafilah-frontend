@@ -49,7 +49,7 @@ final class FrontendInventoryFixtures
         if (User::query()->where('email', 'like', 'f3c-%@example.test')->exists()) {
             throw new RuntimeException('Inventory fixtures already exist; recreate only the owned database.');
         }
-        $groups = ['states', 'validation', 'readonly', 'writeonly', 'foreign', 'archived', 'variant', 'revoke_read', 'revoke_write', 'store_loss', 'membership_loss', 'identity_loss', 'logout', 'switch_get', 'switch_patch', 'principal_get', 'principal_patch', 'committed', 'uncommitted', 'failed_review', 'intervening', 'refresh_failure', 'malformed', 'server_error', 'transaction', 'responsive', 'double_0', 'double_50', 'double_120', 'double_300', 'double_450', 'enter', 'remount', 'docker'];
+        $groups = ['states', 'validation', 'readonly', 'writeonly', 'foreign', 'archived', 'variant', 'revoke_read', 'revoke_write', 'store_loss', 'membership_loss', 'identity_loss', 'logout', 'switch_get', 'switch_patch', 'principal_get', 'principal_patch', 'committed', 'uncommitted', 'failed_review', 'intervening', 'refresh_failure', 'malformed', 'server_error', 'transaction', 'responsive', 'double_0', 'double_50', 'double_120', 'double_300', 'double_450', 'enter', 'remount', 'docker', 'feedback_pending', 'feedback_success', 'feedback_failure', 'feedback_fresh', 'feedback_review', 'feedback_generic', 'feedback_initial'];
         $public = [];
         $private = [];
         foreach ($groups as $group) {
@@ -77,7 +77,7 @@ final class FrontendInventoryFixtures
                         'status' => $kind === 'archived' ? ProductStatus::Archived : ProductStatus::Draft,
                     ])->save();
                     $products[$kind] = ['id' => $product->public_id, 'name' => $name];
-                    if ($kind === 'simple' && ($index === 1 || in_array($group, ['uncommitted', 'failed_review', 'transaction', 'readonly'], true))) {
+                    if ($kind === 'simple' && ($index === 1 || in_array($group, ['uncommitted', 'failed_review', 'transaction', 'readonly', 'feedback_fresh'], true))) {
                         (new ProductStock)->forceFill(['store_id' => $store->getKey(), 'product_id' => $product->getKey(), 'quantity' => $index === 1 ? 37 : 3])->save();
                     }
                     if ($kind === 'simple' && $index === 0) $productId = $product->getKey();

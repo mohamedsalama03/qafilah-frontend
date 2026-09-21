@@ -65,7 +65,8 @@ function ProductDetail({ productUuid }: { productUuid: string }) {
       {inventoryProduct?.type === "simple" && (
         <ProductInventoryPanel
           product={inventoryProduct}
-          productReadUnavailable={!!query.error || query.isFetching}
+          productReadPending={query.isFetching}
+          productReadFailed={!!query.error}
         />
       )}
       {query.error ? (

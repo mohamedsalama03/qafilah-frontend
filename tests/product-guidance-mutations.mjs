@@ -17,7 +17,9 @@ const protectedPaths = [
   "src/features/products/components/product-guidance.test.tsx",
   "src/features/products/product-guidance.test.ts",
 ];
-const outputDirectory = join(root, "artifacts/f3b-l2/guidance-mutations");
+const outputDirectory = process.env.QAFILAH_MUTATION_ARTIFACT_ROOT
+  ? resolve(root, process.env.QAFILAH_MUTATION_ARTIFACT_ROOT, "guidance-mutations")
+  : join(root, "artifacts/f3b-l2/guidance-mutations");
 export const guidanceVariants = {
   "baseline-notice-loss": { expected: "RED", pattern: "notice probe", count: 5, failed: 5 },
   pristine: { expected: "GREEN", count: 15 },
