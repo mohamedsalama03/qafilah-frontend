@@ -42,6 +42,8 @@ function context(id: string) {
 }
 async function fixture(create = false) {
   const api: MerchantApi = {
+    loadProductInventory: vi.fn(),
+    updateProductInventory: vi.fn(),
     authAdapter: {
       loadIdentity: vi.fn(async () => ({ principalId: "guidance-controller-reader" })),
       logout: vi.fn(async () => {}),

@@ -29,6 +29,11 @@ function apiFixture(stores = [storeA, storeB]): MerchantApi {
   return {
     listProducts: vi.fn(),
     loadProduct: vi.fn(),
+    loadProductInventory: vi.fn(async () => ({
+      quantity: null,
+      availability: "unavailable" as const,
+    })),
+    updateProductInventory: vi.fn(),
     createProduct: vi.fn(),
     updateProduct: vi.fn(),
     publishProduct: vi.fn(),

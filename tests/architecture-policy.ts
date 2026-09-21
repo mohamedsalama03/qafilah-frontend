@@ -15,7 +15,13 @@ export type ArchitectureRule =
   | "product-query-isolation"
   | "product-mutation-boundary"
   | "product-mutation-retry"
-  | "product-mutation-isolation";
+  | "product-mutation-isolation"
+  | "inventory-query-isolation"
+  | "inventory-mutation-boundary"
+  | "inventory-mutation-retry"
+  | "inventory-mutation-isolation"
+  | "inventory-absolute-quantity"
+  | "inventory-response-boundary";
 
 export interface ArchitectureViolation {
   rule: ArchitectureRule;
@@ -311,7 +317,8 @@ export function inspectArchitecture(filename: string, source: string): Architect
     }
   }
 
-  // F2's six contracts, three F3-A reads and exactly five F3-B writes. Evidence is not scope.
+  // Published F2/F3-A/F3-B contracts plus exactly two simple Product inventory contracts.
+  // Backend evidence for another capability does not authorize activating it here.
   const verifiedContracts: Record<string, readonly [string, string]> = {
     csrf: ["GET", "/sanctum/csrf-cookie"],
     login: ["POST", "/api/v1/auth/login"],
@@ -327,6 +334,8 @@ export function inspectArchitecture(filename: string, source: string): Architect
     publishProduct: ["POST", "/api/v1/stores/{value}/catalog/products/{value}/publish"],
     unpublishProduct: ["POST", "/api/v1/stores/{value}/catalog/products/{value}/unpublish"],
     archiveProduct: ["POST", "/api/v1/stores/{value}/catalog/products/{value}/archive"],
+    productInventory: ["GET", "/api/v1/stores/{value}/catalog/products/{value}/inventory"],
+    updateProductInventory: ["PATCH", "/api/v1/stores/{value}/catalog/products/{value}/inventory"],
   };
 
   function registryEntry(node: ts.ObjectLiteralExpression): string | undefined {
@@ -407,6 +416,12 @@ export function inspectArchitecture(filename: string, source: string): Architect
       node.properties.some(ts.isSpreadAssignment)
     )
       report("verified-contract-registry", node);
+    if (
+      (entry === "productInventory" || entry === "updateProductInventory") &&
+      (!properties.get("decode") ||
+        expressionPath(properties.get("decode")!) !== "decodeProductInventory")
+    )
+      report("inventory-response-boundary", node);
   }
 
   function roleDescriptor(expression: ts.Expression): boolean {
@@ -458,6 +473,10 @@ export function inspectArchitecture(filename: string, source: string): Architect
 
   const productResources = new Set(["products", "product", "product-categories"]);
   const mutationSource = path === "src/features/products/mutations.ts";
+  const inventorySource = /^src\/features\/inventory\//.test(path);
+  const inventoryMutationSource = path === "src/features/inventory/mutations.ts";
+  const inventoryQuerySource = path === "src/features/inventory/queries.ts";
+  const inventoryDispatches: ts.Node[] = [];
 
   function scopedMutationKey(expression: ts.Expression | undefined): boolean {
     if (!expression) return false;
@@ -489,6 +508,91 @@ export function inspectArchitecture(filename: string, source: string): Architect
         fields.set(property.name.text, property.name);
     }
     return fields;
+  }
+
+  function scopedInventoryKey(expression: ts.Expression | undefined): boolean {
+    if (!expression) return false;
+    const key = resolveExpression(expression);
+    if (!ts.isCallExpression(key) || !key.arguments[0]) return false;
+    const origin = unwrap(key.arguments[0]);
+    if (
+      !(ts.isIdentifier(origin) && origin.text === "scope") &&
+      expressionPath(origin) !== "options.scope"
+    )
+      return false;
+    const target = expressionPath(key.expression) ?? key.expression.getText(file);
+    if (target === "inventoryKeys.detail" || target === "productKeys.detail")
+      return key.arguments.length === 2;
+    const resource = key.arguments[1];
+    if (target !== "storeKeys.resource" || !resource) return false;
+    const allowed = ["products", "product", "product-inventory"];
+    if (allowed.includes(literal(resource) ?? "")) return true;
+    // The authority-denial cleanup iterates an explicit bounded resource list.
+    // An arbitrary variable or dynamic list cannot widen this cache boundary.
+    if (ts.isIdentifier(resource)) {
+      for (let parent: ts.Node | undefined = key.parent; parent; parent = parent.parent) {
+        if (!ts.isForOfStatement(parent) || !ts.isVariableDeclarationList(parent.initializer))
+          continue;
+        const declaration = parent.initializer.declarations[0];
+        if (
+          !declaration ||
+          !ts.isIdentifier(declaration.name) ||
+          declaration.name.text !== resource.text
+        )
+          continue;
+        const entries = resolveExpression(parent.expression);
+        return (
+          ts.isArrayLiteralExpression(entries) &&
+          entries.elements.length > 0 &&
+          entries.elements.every((entry) => allowed.includes(literal(entry) ?? ""))
+        );
+      }
+    }
+    return false;
+  }
+
+  function inspectInventoryKeyFactory(node: ts.VariableDeclaration): void {
+    if (!ts.isIdentifier(node.name) || node.name.text !== "inventoryKeys" || !node.initializer)
+      return;
+    const entries = objectFields(node.initializer);
+    const detail = entries?.get("detail");
+    const factory = detail ? resolveExpression(detail) : undefined;
+    if (
+      !entries ||
+      entries.size !== 1 ||
+      !factory ||
+      !ts.isArrowFunction(factory) ||
+      ts.isBlock(factory.body)
+    ) {
+      report("inventory-query-isolation", node);
+      return;
+    }
+    const call = unwrap(factory.body);
+    const scopeParameter = factory.parameters[0]?.name;
+    const productParameter = factory.parameters[1]?.name;
+    const fields = ts.isCallExpression(call) ? objectFields(call.arguments[2]) : undefined;
+    const product = fields?.get("productUuid");
+    if (
+      !ts.isCallExpression(call) ||
+      expressionPath(call.expression) !== "storeKeys.resource" ||
+      !scopeParameter ||
+      !ts.isIdentifier(scopeParameter) ||
+      !call.arguments[0] ||
+      call.arguments[0].getText(file) !== scopeParameter.text ||
+      literal(call.arguments[1]) !== "product-inventory" ||
+      !productParameter ||
+      !ts.isIdentifier(productParameter) ||
+      !fields ||
+      fields.size !== 1 ||
+      !product ||
+      product.getText(file) !== productParameter.text
+    )
+      report("inventory-query-isolation", factory);
+  }
+
+  function quantityReference(expression: ts.Expression): boolean {
+    const target = expressionPath(expression);
+    return !!target && /(?:^|\.)(?:quantity|currentQuantity|previousQuantity)$/.test(target);
   }
 
   function inspectProductKeyFactory(node: ts.VariableDeclaration): void {
@@ -548,6 +652,32 @@ export function inspectArchitecture(filename: string, source: string): Architect
   visit(file, (node) => {
     if (ts.isObjectLiteralExpression(node)) inspectContract(node);
     if (ts.isVariableDeclaration(node)) inspectProductKeyFactory(node);
+    if (ts.isVariableDeclaration(node)) inspectInventoryKeyFactory(node);
+    if (inventorySource && ts.isBinaryExpression(node)) {
+      const operator = node.operatorToken.kind;
+      if (
+        ([
+          ts.SyntaxKind.PlusToken,
+          ts.SyntaxKind.MinusToken,
+          ts.SyntaxKind.PlusEqualsToken,
+          ts.SyntaxKind.MinusEqualsToken,
+        ].includes(operator) &&
+          (quantityReference(node.left) || quantityReference(node.right))) ||
+        ([ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(operator) &&
+          quantityReference(node.left) &&
+          literal(node.right) === undefined &&
+          ts.isNumericLiteral(unwrap(node.right)) &&
+          unwrap(node.right).getText(file) === "0")
+      )
+        report("inventory-absolute-quantity", node);
+    }
+    if (
+      inventorySource &&
+      (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+      [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator) &&
+      quantityReference(node.operand)
+    )
+      report("inventory-absolute-quantity", node);
     if (
       ts.isBinaryExpression(node) &&
       [
@@ -618,7 +748,8 @@ export function inspectArchitecture(filename: string, source: string): Architect
         target &&
         /\.(?:listProducts|loadProduct|listCategories)$/.test(target) &&
         path !== "src/features/products/queries.ts" &&
-        !mutationSource
+        !mutationSource &&
+        !inventoryMutationSource
       )
         report("product-query-isolation", node);
       if (
@@ -629,6 +760,35 @@ export function inspectArchitecture(filename: string, source: string): Architect
         !mutationSource
       )
         report("product-mutation-boundary", node);
+      if (
+        target?.endsWith(".loadProductInventory") &&
+        !inventoryQuerySource &&
+        !inventoryMutationSource
+      )
+        report("inventory-query-isolation", node);
+      if (target?.endsWith(".updateProductInventory") && !inventoryMutationSource)
+        report("inventory-mutation-boundary", node);
+      if (target?.endsWith(".updateProductInventory") && inventoryMutationSource)
+        inventoryDispatches.push(node);
+      if (
+        inventoryMutationSource &&
+        target &&
+        /^(?:(?:window|globalThis|self)\.)?(?:setTimeout|setInterval|requestAnimationFrame)$/.test(
+          target,
+        )
+      )
+        report("inventory-mutation-retry", node);
+      if ((inventoryMutationSource || inventoryQuerySource) && ts.isCallExpression(node)) {
+        if (target?.endsWith(".setQueryData") && !scopedInventoryKey(node.arguments[0]))
+          report("inventory-mutation-isolation", node);
+        if (
+          /\.(?:invalidateQueries|cancelQueries|removeQueries|resetQueries|refetchQueries|setQueriesData)$/.test(
+            target ?? "",
+          ) &&
+          !scopedInventoryKey(objectFields(node.arguments[0])?.get("queryKey"))
+        )
+          report("inventory-mutation-isolation", node);
+      }
       if (
         mutationSource &&
         target &&
@@ -697,6 +857,12 @@ export function inspectArchitecture(filename: string, source: string): Architect
       const name = nameOf(node.name);
       if (
         name === "retry" &&
+        inventorySource &&
+        resolveExpression(node.initializer).kind !== ts.SyntaxKind.FalseKeyword
+      )
+        report("inventory-mutation-retry", node);
+      if (
+        name === "retry" &&
         (mutationSource ||
           (path === "src/lib/query/client.ts" &&
             ts.isObjectLiteralExpression(node.parent) &&
@@ -712,6 +878,11 @@ export function inspectArchitecture(filename: string, source: string): Architect
         report("tenant-selector-authority", node);
       if (name === "queryKey") {
         const key = resolveExpression(node.initializer);
+        if (
+          ts.isArrayLiteralExpression(key) &&
+          (inventorySource || key.elements.some((item) => literal(item) === "product-inventory"))
+        )
+          report("inventory-query-isolation", node);
         if (
           ts.isArrayLiteralExpression(key) &&
           (/(^|\/)src\/features\/products\//.test(path) ||
@@ -730,5 +901,9 @@ export function inspectArchitecture(filename: string, source: string): Architect
     )
       report("unsafe-html", node);
   });
+  // There is one deliberate dispatch site in the inventory lifecycle. A second
+  // catch/finally retry path must not be introduced alongside it.
+  if (inventoryDispatches.length > 1)
+    inventoryDispatches.slice(1).forEach((node) => report("inventory-mutation-retry", node));
   return violations;
 }

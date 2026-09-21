@@ -1,4 +1,9 @@
 import { createApiClient } from "../api/client";
+import type {
+  ProductInventoryReadInput,
+  UpdateProductInventoryInput,
+} from "../../features/inventory/contracts";
+import { inventoryPayloadSchema } from "../../features/inventory/model";
 import { ApiError } from "../api/errors";
 import type { EndpointContract } from "../api/types";
 import type {
@@ -227,6 +232,36 @@ export function createMerchantApi(options: MerchantApiOptions) {
       const result = await api.request(merchantContracts.categories, requestInput, { signal });
       if (result.pagination.per_page !== requestInput.criteria!.per_page)
         throw new ApiError("invalid-response");
+      return result;
+    },
+    async loadProductInventory(input: ProductInventoryReadInput, signal?: AbortSignal) {
+      const requestInput = { storeUuid: input.storeUuid, productUuid: input.productUuid };
+      try {
+        merchantContracts.productInventory.path(requestInput);
+      } catch {
+        throw new ApiError("configuration");
+      }
+      return api.request(merchantContracts.productInventory, requestInput, { signal });
+    },
+    async updateProductInventory(input: UpdateProductInventoryInput, signal?: AbortSignal) {
+      let requestInput: UpdateProductInventoryInput;
+      try {
+        requestInput = {
+          storeUuid: input.storeUuid,
+          productUuid: input.productUuid,
+          data: inventoryPayloadSchema.parse(input.data),
+        };
+        merchantContracts.updateProductInventory.path(requestInput);
+      } catch {
+        throw new ApiError("configuration");
+      }
+      await prepareCsrf(signal);
+      const result = await api.request(merchantContracts.updateProductInventory, requestInput, {
+        signal,
+      });
+      // No UUID/version is returned: operation scope supplies correlation, never a receipt.
+      if (result.quantity !== requestInput.data.quantity)
+        throw new ApiError("invalid-response", { mutationOutcome: "unknown" });
       return result;
     },
     async createProduct(input: CreateProductInput, signal?: AbortSignal) {

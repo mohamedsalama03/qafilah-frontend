@@ -317,7 +317,14 @@ test("real Product detail renders plain text and exact simple and Variant commer
   expect(
     traffic
       .get(page)!
-      .some((entry) => /\/(pricing|inventory|variants|media)(?:\?|$)/.test(entry.path)),
+      .some(
+        (entry) =>
+          /\/(pricing|inventory|variants|media)(?:\?|$)/.test(entry.path) &&
+          !(
+            entry.method === "GET" &&
+            entry.path === `/api/v1/stores/${store.id}/catalog/products/${product.id}/inventory`
+          ),
+      ),
   ).toBe(false);
 });
 

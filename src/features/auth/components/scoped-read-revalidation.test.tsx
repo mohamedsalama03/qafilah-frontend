@@ -69,6 +69,11 @@ function fixture() {
     loadStoreContext: vi.fn(async () => context),
     listProducts: vi.fn(async () => page),
     loadProduct: vi.fn(),
+    loadProductInventory: vi.fn(async () => ({
+      quantity: null,
+      availability: "unavailable" as const,
+    })),
+    updateProductInventory: vi.fn(),
     createProduct: vi.fn(),
     updateProduct: vi.fn(),
     publishProduct: vi.fn(),

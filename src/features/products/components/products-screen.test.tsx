@@ -84,6 +84,11 @@ function apiFixture(permissions = ["products.view"]): MerchantApi {
     loadStoreContext: vi.fn(async (uuid) => context(uuid, permissions)),
     listProducts: vi.fn(async () => page()),
     loadProduct: vi.fn(async () => product()),
+    loadProductInventory: vi.fn(async () => ({
+      quantity: null,
+      availability: "unavailable" as const,
+    })),
+    updateProductInventory: vi.fn(),
     createProduct: vi.fn(),
     updateProduct: vi.fn(),
     publishProduct: vi.fn(),

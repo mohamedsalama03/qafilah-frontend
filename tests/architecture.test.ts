@@ -540,7 +540,7 @@ describe("permanent executable architecture boundaries", () => {
     );
   });
 
-  it("activates exactly F2 plus three F3-A reads and five F3-B mutations", () => {
+  it("activates exactly F2, F3-A, F3-B and two simple Product inventory contracts", () => {
     const uuid = "15913d0d-10a1-40ed-bc6f-3e491f81a56f";
     expect(backendBaseline).toBe("6614690a3b24b39f45c7c1b9ed85c20ecb22cbbf");
     expect(Object.keys(merchantContracts).sort()).toEqual([
@@ -553,11 +553,13 @@ describe("permanent executable architecture boundaries", () => {
       "login",
       "logout",
       "product",
+      "productInventory",
       "products",
       "publishProduct",
       "stores",
       "unpublishProduct",
       "updateProduct",
+      "updateProductInventory",
     ]);
     expect([
       [merchantContracts.csrf.method, merchantContracts.csrf.path()],
@@ -599,6 +601,18 @@ describe("permanent executable architecture boundaries", () => {
         merchantContracts.archiveProduct.method,
         merchantContracts.archiveProduct.path({ storeUuid: uuid, productUuid: uuid }),
       ],
+      [
+        merchantContracts.productInventory.method,
+        merchantContracts.productInventory.path({ storeUuid: uuid, productUuid: uuid }),
+      ],
+      [
+        merchantContracts.updateProductInventory.method,
+        merchantContracts.updateProductInventory.path({
+          storeUuid: uuid,
+          productUuid: uuid,
+          data: { quantity: 0 },
+        }),
+      ],
     ]).toEqual([
       ["GET", "/sanctum/csrf-cookie"],
       ["POST", "/api/v1/auth/login"],
@@ -614,6 +628,8 @@ describe("permanent executable architecture boundaries", () => {
       ["POST", `/api/v1/stores/${uuid}/catalog/products/${uuid}/publish`],
       ["POST", `/api/v1/stores/${uuid}/catalog/products/${uuid}/unpublish`],
       ["POST", `/api/v1/stores/${uuid}/catalog/products/${uuid}/archive`],
+      ["GET", `/api/v1/stores/${uuid}/catalog/products/${uuid}/inventory`],
+      ["PATCH", `/api/v1/stores/${uuid}/catalog/products/${uuid}/inventory`],
     ]);
     expect(() => merchantContracts.stores.path(0)).toThrow();
     expect(() => merchantContracts.context.path("valid-shape-is-not-membership")).toThrow();
@@ -689,7 +705,7 @@ describe("permanent executable architecture boundaries", () => {
   it.each([
     ["restoreProduct", "POST", "restore"],
     ["updateProductPrice", "PATCH", "pricing"],
-    ["updateProductInventory", "PATCH", "inventory"],
+    ["adjustProductInventory", "POST", "inventory/adjustments"],
     ["createVariant", "POST", "variants"],
     ["attachMedia", "POST", "media"],
   ])("rejects out-of-scope mutation contract %s", (name, method, suffix) => {
@@ -772,6 +788,155 @@ describe("permanent executable architecture boundaries", () => {
       expect(
         inspectArchitecture("src/lib/backend/contracts.ts", source).map(({ rule }) => rule),
       ).toContain("verified-contract-registry");
+    },
+  );
+
+  const inventoryFile = "src/features/inventory/mutations.ts";
+  it.each([
+    [
+      "component write",
+      "inventory-mutation-boundary",
+      "api.updateProductInventory(input);",
+      merchantFile,
+    ],
+    [
+      "component read",
+      "inventory-query-isolation",
+      "api.loadProductInventory(input);",
+      merchantFile,
+    ],
+    [
+      "global inventory query",
+      "inventory-query-isolation",
+      'useQuery({queryKey:["product-inventory", productUuid]});',
+    ],
+    [
+      "missing Product key",
+      "inventory-query-isolation",
+      'const inventoryKeys = {detail: (scope, productUuid) => storeKeys.resource(scope, "product-inventory")};',
+    ],
+    [
+      "missing scope key",
+      "inventory-query-isolation",
+      'const inventoryKeys = {detail: (scope, productUuid) => storeKeys.resource(otherScope, "product-inventory", {productUuid})};',
+    ],
+    [
+      "missing principal/revision",
+      "inventory-query-isolation",
+      'const inventoryKeys = {detail: (scope, productUuid) => [scope.storeUuid, productUuid, "inventory"]};',
+    ],
+    [
+      "global cache write",
+      "inventory-mutation-isolation",
+      'cache.setQueryData(["inventory", productUuid], inventory);',
+    ],
+    [
+      "foreign scope cache write",
+      "inventory-mutation-isolation",
+      "cache.setQueryData(inventoryKeys.detail(otherScope, productUuid), inventory);",
+    ],
+    [
+      "unscoped invalidation",
+      "inventory-mutation-isolation",
+      'cache.invalidateQueries({queryKey:["products"]});',
+    ],
+    [
+      "automatic retry",
+      "inventory-mutation-retry",
+      "useMutation({mutationFn: write, retry: true});",
+    ],
+    [
+      "delayed replay",
+      "inventory-mutation-retry",
+      "setTimeout(() => api.updateProductInventory(input), 100);",
+    ],
+    [
+      "replay after a rejected PATCH",
+      "inventory-mutation-retry",
+      "api.updateProductInventory(input).catch(() => api.updateProductInventory(input));",
+    ],
+    [
+      "optimistic addition",
+      "inventory-absolute-quantity",
+      "const next = current.quantity + delta;",
+    ],
+    [
+      "optimistic subtraction",
+      "inventory-absolute-quantity",
+      "const next = current.quantity - delta;",
+    ],
+    ["optimistic increment", "inventory-absolute-quantity", "inventory.quantity++;"],
+    [
+      "null coerced to zero",
+      "inventory-absolute-quantity",
+      "const quantity = inventory.quantity ?? 0;",
+    ],
+    [
+      "null/zero truthiness conflation",
+      "inventory-absolute-quantity",
+      "const quantity = inventory.quantity || 0;",
+    ],
+    [
+      "inventory Role authority",
+      "role-derived-authority",
+      'const canEditInventory = context.role.name === "Owner";',
+    ],
+    [
+      "inventory UUID authority",
+      "uuid-derived-authority",
+      "const canSetQuantity = Boolean(productUuid);",
+    ],
+    [
+      "persisted mutation authority",
+      "browser-persistence",
+      'sessionStorage.setItem("inventory-slot", slot);',
+    ],
+    [
+      "inventory bypasses central transport",
+      "central-api-boundary",
+      'fetch("/api/v1/stores/example/catalog/products/example/inventory", {method:"PATCH"});',
+    ],
+  ] as Array<[string, ArchitectureRule, string, string?]>)(
+    "rejects inventory architecture mutant: %s",
+    (_name, rule, source, file) => {
+      expect(inspectArchitecture(file ?? inventoryFile, source).map((item) => item.rule)).toContain(
+        rule,
+      );
+    },
+  );
+
+  it.each(["pricing", "media", "options", "variants/variant/inventory"])(
+    "rejects substituting inventory with deferred %s capability",
+    (suffix) => {
+      const source = `export const merchantContracts = { updateProductInventory: {method: "PATCH", path: input => \`/api/v1/stores/\${input.storeUuid}/catalog/products/\${input.productUuid}/${suffix}\`} };`;
+      expect(
+        inspectArchitecture("src/lib/backend/contracts.ts", source).map((item) => item.rule),
+      ).toContain("verified-contract-registry");
+    },
+  );
+
+  it("allows inventory scope keys, explicit absolute values and executable decoys", () => {
+    const source = `
+      const inventoryKeys = { detail: (scope, productUuid) => storeKeys.resource(scope, "product-inventory", { productUuid }) };
+      cache.setQueryData(inventoryKeys.detail(scope, productUuid), authoritative);
+      cache.invalidateQueries({ queryKey: productKeys.detail(scope, productUuid) });
+      const input = { quantity: 0 };
+      const hasPermission = context.permissions.includes("products.inventory.update");
+      const label = inventory.quantity === null ? "Not configured" : String(inventory.quantity);
+      // inventory.quantity++; retry: true; api.updateProductInventory(input);
+      const explanation = "inventory.quantity ?? 0; retry: true; localStorage.setItem('authority', slot)";
+    `;
+    expect(inspectArchitecture(inventoryFile, source)).toEqual([]);
+  });
+
+  it.each(["productInventory", "updateProductInventory"])(
+    "requires strict inventory decoding for %s rather than asserting a response type",
+    (entry) => {
+      const method = entry === "productInventory" ? "GET" : "PATCH";
+      const source = `export const merchantContracts = { ${entry}: {method: "${method}", path: input => \`/api/v1/stores/\${input.storeUuid}/catalog/products/\${input.productUuid}/inventory\`, decode: payload => payload.data as ProductInventory} };`;
+      expect(
+        inspectArchitecture("src/lib/backend/contracts.ts", source).map((item) => item.rule),
+      ).toContain("inventory-response-boundary");
     },
   );
 });

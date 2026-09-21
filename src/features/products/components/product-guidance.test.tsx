@@ -71,6 +71,11 @@ function fixture(mode: "edit" | "create" = "edit") {
       },
     })),
     listCategories: vi.fn(),
+    loadProductInventory: vi.fn(async () => ({
+      quantity: null,
+      availability: "unavailable" as const,
+    })),
+    updateProductInventory: vi.fn(),
     createProduct: vi.fn(async () => current),
     updateProduct: vi.fn(async () => current),
     publishProduct: vi.fn(),

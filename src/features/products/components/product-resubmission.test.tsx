@@ -91,6 +91,11 @@ function fixture(operation: Operation) {
       effectiveRange: { created_from: "2025-09-01T00:00:00+00:00", created_to: at },
     })),
     listCategories: vi.fn(),
+    loadProductInventory: vi.fn(async () => ({
+      quantity: null,
+      availability: "unavailable" as const,
+    })),
+    updateProductInventory: vi.fn(),
     createProduct: vi.fn(async () => current),
     updateProduct: vi.fn(async () => current),
     publishProduct: vi.fn(async () => ({ ...current, status: "published" as const })),

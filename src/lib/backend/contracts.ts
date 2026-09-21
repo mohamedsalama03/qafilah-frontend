@@ -1,5 +1,12 @@
 import { z } from "zod";
 import {
+  decodeProductInventory,
+  type ProductInventory,
+  type ProductInventoryReadInput,
+  type UpdateProductInventoryInput,
+} from "../../features/inventory/contracts";
+import { inventoryPayloadSchema } from "../../features/inventory/model";
+import {
   categoryQueryString,
   decodeCategoryPage,
   decodeMerchantProduct,
@@ -238,6 +245,26 @@ export const merchantContracts = {
     decodeError: (payload: unknown) =>
       validation(payload, ["status", "q", "sort", "per_page", "cursor"]),
   } satisfies EndpointContract<CategoryListInput, CategoryPage>,
+  productInventory: {
+    evidence: evidence(
+      "routes/api.php:414; Inventory ProductInventoryController/FindProductInventoryQuery/ProductInventoryResource; Catalog PreAuthorizeCatalogRoute/ProductPolicy; CatalogCommercialStateApiTest",
+    ),
+    method: "GET",
+    path: (input: ProductInventoryReadInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/inventory`,
+    decode: decodeProductInventory,
+  } satisfies EndpointContract<ProductInventoryReadInput, ProductInventory>,
+  updateProductInventory: {
+    evidence: evidence(
+      "routes/api.php:416; Inventory UpdateProductInventoryRequest/UpdateProductInventoryAction/ProductInventoryController/ProductInventoryResource; CatalogMutationGuard; CatalogCommercialStateApiTest",
+    ),
+    method: "PATCH",
+    path: (input: UpdateProductInventoryInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/inventory`,
+    body: (input: UpdateProductInventoryInput) => inventoryPayloadSchema.parse(input.data),
+    decode: decodeProductInventory,
+    decodeError: (payload: unknown) => validation(payload, ["quantity", "product"]),
+  } satisfies EndpointContract<UpdateProductInventoryInput, ProductInventory>,
   createProduct: {
     evidence: evidence(
       "routes/api.php:406; Catalog CreateProductRequest/CreateProductAction/MerchantProductController::store/MerchantProductResource/ProductPolicy; CatalogApiTest",

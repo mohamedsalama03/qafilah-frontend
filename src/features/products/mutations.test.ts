@@ -99,6 +99,8 @@ async function fixture(permissions = allPermissions, productUuid: string | undef
     })),
     loadStoreContext: vi.fn(async (uuid) => context(uuid, permissions)),
     loadProduct: vi.fn(async () => product()),
+    loadProductInventory: vi.fn(),
+    updateProductInventory: vi.fn(),
     listProducts: vi.fn(async () => page()),
     listCategories: vi.fn(),
     createProduct: vi.fn(async () => product()),

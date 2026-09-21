@@ -50,6 +50,8 @@ async function fixture(create = false) {
     permissions: ["products.view", "products.create", "products.update", "products.publish"],
   };
   const api: MerchantApi = {
+    loadProductInventory: vi.fn(),
+    updateProductInventory: vi.fn(),
     authAdapter: {
       loadIdentity: vi.fn(async () => ({ principalId: "slot-reader" })),
       logout: vi.fn(async () => {}),

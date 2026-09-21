@@ -92,6 +92,11 @@ function apiFixture(permissions = allPermissions, current = product()): Merchant
       pagination: { per_page: 100, next_cursor: null, previous_cursor: null },
       limit: 100,
     })),
+    loadProductInventory: vi.fn(async () => ({
+      quantity: null,
+      availability: "unavailable" as const,
+    })),
+    updateProductInventory: vi.fn(),
     createProduct: vi.fn(async () => current),
     updateProduct: vi.fn(async () => current),
     publishProduct: vi.fn(async () => product({ status: "published", published_at: timestamp })),

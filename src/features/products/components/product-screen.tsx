@@ -6,6 +6,7 @@ import { Button, buttonStyles } from "@/components/ui/button";
 import { DetailLayout } from "@/components/ui/detail-layout";
 import { PageHeader } from "@/components/ui/page-header";
 import { useStores } from "@/features/stores/components/store-provider";
+import { ProductInventoryPanel } from "@/features/inventory/components/product-inventory-panel";
 import { ApiError } from "@/lib/api/errors";
 import { useProduct } from "../queries";
 import { catalogUuidSchema, formatProductPrice } from "../model";
@@ -33,6 +34,14 @@ function ProductDetail({ productUuid }: { productUuid: string }) {
   const { state } = useStores();
   const query = useProduct(productUuid);
   const product = query.error || query.isFetching ? undefined : query.data;
+  // A transient projection refresh must not erase an already-confirmed inventory write.
+  // Missing resources and authority/contract failures still remove all private target state.
+  const inventoryProduct =
+    !query.error ||
+    (query.error instanceof ApiError &&
+      ["network", "timeout", "server", "rate-limited"].includes(query.error.kind))
+      ? query.data
+      : undefined;
   const href = `/stores/${state.scope!.storeUuid}/products`;
   return (
     <>
@@ -53,6 +62,12 @@ function ProductDetail({ productUuid }: { productUuid: string }) {
           </>
         }
       />
+      {inventoryProduct?.type === "simple" && (
+        <ProductInventoryPanel
+          product={inventoryProduct}
+          productReadUnavailable={!!query.error || query.isFetching}
+        />
+      )}
       {query.error ? (
         <>
           <CatalogError error={query.error} detail retry={() => void query.refetch()} />

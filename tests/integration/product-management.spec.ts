@@ -126,10 +126,17 @@ test.afterEach(async ({ page }, info) => {
   expect(
     requests
       .get(page)!
-      .some((request) =>
-        /\/storefront\/|\/platform\/|\/(pricing|inventory|variants|media|options|attributes|collections)(?:\/|\?|$)/.test(
-          request.path,
-        ),
+      .some(
+        (request) =>
+          /\/storefront\/|\/platform\/|\/(pricing|inventory|variants|media|options|attributes|collections)(?:\/|\?|$)/.test(
+            request.path,
+          ) &&
+          !(
+            request.method === "GET" &&
+            /^\/api\/v1\/stores\/[a-f0-9-]+\/catalog\/products\/[a-f0-9-]+\/inventory$/.test(
+              request.path,
+            )
+          ),
       ),
   ).toBe(false);
   for (const request of writes(page)) {

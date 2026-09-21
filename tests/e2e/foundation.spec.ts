@@ -57,6 +57,8 @@ async function screenshot(page: Page, name: string, fullPage = true) {
     path: path.join(directory, `${name}.png`),
     fullPage,
     animations: "disabled",
+    // Avoid Playwright injecting inline caret styles while a streamed surface hydrates.
+    caret: "initial",
   });
 }
 
@@ -367,6 +369,14 @@ test("table pagination is URL-addressable and follows browser history", async ({
 
 test("table loading, empty and error states preserve context and recovery", async ({ page }) => {
   await page.goto("/design-system/table");
+  // The server-rendered select is usable before its React onChange is attached.
+  // Exercise the real row menu in this client subtree before changing its state.
+  const actions = page.getByRole("button", { name: "Actions for EX-001", exact: true });
+  await actions.click();
+  await expect(page.getByRole("menuitem", { name: "View detail pattern" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toBeHidden();
+  await expect(actions).toBeFocused();
   const state = page.getByLabel("Preview state", { exact: true });
   await state.selectOption("loading");
   await expect(page).toHaveURL(/state=loading/);
