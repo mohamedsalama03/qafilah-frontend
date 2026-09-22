@@ -15,6 +15,15 @@ function apiFixture(): MerchantApi {
   return {
     listProducts: vi.fn(),
     loadProduct: vi.fn(),
+    listProductOptions: vi.fn(),
+    createProductOption: vi.fn(),
+    updateProductOption: vi.fn(),
+    createProductOptionValue: vi.fn(),
+    updateProductOptionValue: vi.fn(),
+    listProductVariants: vi.fn(),
+    createProductVariant: vi.fn(),
+    loadProductVariant: vi.fn(),
+    updateProductVariant: vi.fn(),
     loadProductInventory: vi.fn(async () => ({
       quantity: null,
       availability: "unavailable" as const,

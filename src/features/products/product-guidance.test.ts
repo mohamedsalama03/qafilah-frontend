@@ -42,6 +42,15 @@ function context(id: string) {
 }
 async function fixture(create = false) {
   const api: MerchantApi = {
+    listProductOptions: vi.fn(),
+    createProductOption: vi.fn(),
+    updateProductOption: vi.fn(),
+    createProductOptionValue: vi.fn(),
+    updateProductOptionValue: vi.fn(),
+    listProductVariants: vi.fn(),
+    createProductVariant: vi.fn(),
+    loadProductVariant: vi.fn(),
+    updateProductVariant: vi.fn(),
     loadProductInventory: vi.fn(),
     updateProductInventory: vi.fn(),
     authAdapter: {

@@ -7,6 +7,29 @@ import {
 } from "../../features/inventory/contracts";
 import { inventoryPayloadSchema } from "../../features/inventory/model";
 import {
+  decodeMerchantProductOption,
+  decodeMerchantVariant,
+  decodeProductOptions,
+  decodeProductVariants,
+  type CreateProductOptionInput,
+  type UpdateProductOptionInput,
+  type CreateProductOptionValueInput,
+  type UpdateProductOptionValueInput,
+  type CreateProductVariantInput,
+  type UpdateProductVariantInput,
+  type ProductOptionsReadInput,
+  type ProductVariantsReadInput,
+  type ProductVariantReadInput,
+  type MerchantProductOption,
+  type MerchantVariant,
+} from "../../features/variants/contracts";
+import {
+  optionPayloadSchema,
+  valuePayloadSchema,
+  createVariantPayloadSchema,
+  updateVariantPayloadSchema,
+} from "../../features/variants/model";
+import {
   categoryQueryString,
   decodeCategoryPage,
   decodeMerchantProduct,
@@ -138,7 +161,115 @@ export function readRequestId(payload: unknown): string | undefined {
   return diagnostic.success ? diagnostic.data.meta.request_id : undefined;
 }
 
+const structuralErrorFields = [
+  "product",
+  "option",
+  "value",
+  "variant",
+  "name",
+  "position",
+  "value_ids",
+  "value_ids.0",
+  "value_ids.1",
+  "value_ids.2",
+  "sku",
+  "status",
+] as const;
+
 export const merchantContracts = {
+  productOptions: {
+    evidence: evidence(
+      "routes/api.php:418; Catalog ListProductOptionsQuery/MerchantProductOptionCollection/ProductPolicy",
+    ),
+    method: "GET",
+    path: (input: ProductOptionsReadInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/options`,
+    decode: decodeProductOptions,
+  } satisfies EndpointContract<ProductOptionsReadInput, MerchantProductOption[]>,
+  createProductOption: {
+    evidence: evidence(
+      "routes/api.php:420; Catalog CreateProductOptionRequest/CreateProductOptionAction/MerchantProductOptionResource",
+    ),
+    method: "POST",
+    path: (input: CreateProductOptionInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/options`,
+    body: (input: CreateProductOptionInput) => optionPayloadSchema.parse(input.data),
+    decode: decodeMerchantProductOption,
+    decodeError: (payload: unknown) => validation(payload, structuralErrorFields),
+  } satisfies EndpointContract<CreateProductOptionInput, MerchantProductOption>,
+  updateProductOption: {
+    evidence: evidence(
+      "routes/api.php:422; Catalog UpdateProductOptionRequest/UpdateProductOptionAction/MerchantProductOptionResource",
+    ),
+    method: "PATCH",
+    path: (input: UpdateProductOptionInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/options/${catalogUuidSchema.parse(input.optionUuid)}`,
+    body: (input: UpdateProductOptionInput) => optionPayloadSchema.parse(input.data),
+    decode: decodeMerchantProductOption,
+    decodeError: (payload: unknown) => validation(payload, structuralErrorFields),
+  } satisfies EndpointContract<UpdateProductOptionInput, MerchantProductOption>,
+  createProductOptionValue: {
+    evidence: evidence(
+      "routes/api.php:424; Catalog CreateProductOptionValueRequest/CreateProductOptionValueAction/MerchantProductOptionResource",
+    ),
+    method: "POST",
+    path: (input: CreateProductOptionValueInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/options/${catalogUuidSchema.parse(input.optionUuid)}/values`,
+    body: (input: CreateProductOptionValueInput) => valuePayloadSchema.parse(input.data),
+    decode: decodeMerchantProductOption,
+    decodeError: (payload: unknown) => validation(payload, structuralErrorFields),
+  } satisfies EndpointContract<CreateProductOptionValueInput, MerchantProductOption>,
+  updateProductOptionValue: {
+    evidence: evidence(
+      "routes/api.php:426; Catalog UpdateProductOptionValueRequest/UpdateProductOptionValueAction/MerchantProductOptionResource",
+    ),
+    method: "PATCH",
+    path: (input: UpdateProductOptionValueInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/options/${catalogUuidSchema.parse(input.optionUuid)}/values/${catalogUuidSchema.parse(input.valueUuid)}`,
+    body: (input: UpdateProductOptionValueInput) => valuePayloadSchema.parse(input.data),
+    decode: decodeMerchantProductOption,
+    decodeError: (payload: unknown) => validation(payload, structuralErrorFields),
+  } satisfies EndpointContract<UpdateProductOptionValueInput, MerchantProductOption>,
+  productVariants: {
+    evidence: evidence(
+      "routes/api.php:436; Catalog ListProductVariantsQuery/MerchantVariantCollection/ProductPolicy",
+    ),
+    method: "GET",
+    path: (input: ProductVariantsReadInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/variants`,
+    decode: decodeProductVariants,
+  } satisfies EndpointContract<ProductVariantsReadInput, MerchantVariant[]>,
+  createProductVariant: {
+    evidence: evidence(
+      "routes/api.php:438; Catalog CreateProductVariantRequest/CreateProductVariantAction/MerchantVariantResource",
+    ),
+    method: "POST",
+    path: (input: CreateProductVariantInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/variants`,
+    body: (input: CreateProductVariantInput) => createVariantPayloadSchema.parse(input.data),
+    decode: decodeMerchantVariant,
+    decodeError: (payload: unknown) => validation(payload, structuralErrorFields),
+  } satisfies EndpointContract<CreateProductVariantInput, MerchantVariant>,
+  productVariant: {
+    evidence: evidence(
+      "routes/api.php:440; Catalog FindProductVariantQuery/MerchantVariantResource/CatalogRouteBinding",
+    ),
+    method: "GET",
+    path: (input: ProductVariantReadInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/variants/${catalogUuidSchema.parse(input.variantUuid)}`,
+    decode: decodeMerchantVariant,
+  } satisfies EndpointContract<ProductVariantReadInput, MerchantVariant>,
+  updateProductVariant: {
+    evidence: evidence(
+      "routes/api.php:442; Catalog UpdateProductVariantRequest/UpdateProductVariantAction/MerchantVariantResource",
+    ),
+    method: "PATCH",
+    path: (input: UpdateProductVariantInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/variants/${catalogUuidSchema.parse(input.variantUuid)}`,
+    body: (input: UpdateProductVariantInput) => updateVariantPayloadSchema.parse(input.data),
+    decode: decodeMerchantVariant,
+    decodeError: (payload: unknown) => validation(payload, structuralErrorFields),
+  } satisfies EndpointContract<UpdateProductVariantInput, MerchantVariant>,
   csrf: {
     evidence: evidence(
       "composer.lock Laravel Sanctum4.3.2; SanctumServiceProvider::defineRoutes; CsrfCookieController::show",

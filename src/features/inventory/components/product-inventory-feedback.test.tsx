@@ -79,6 +79,15 @@ function apiFixture(): MerchantApi {
     })),
     loadStoreContext: vi.fn(async () => context()),
     loadProduct: vi.fn(async () => product(currentQuantity)),
+    listProductOptions: vi.fn(),
+    createProductOption: vi.fn(),
+    updateProductOption: vi.fn(),
+    createProductOptionValue: vi.fn(),
+    updateProductOptionValue: vi.fn(),
+    listProductVariants: vi.fn(),
+    createProductVariant: vi.fn(),
+    loadProductVariant: vi.fn(),
+    updateProductVariant: vi.fn(),
     loadProductInventory: vi.fn(async () => inventory(currentQuantity)),
     updateProductInventory: vi.fn(async ({ data }) => {
       currentQuantity = data.quantity;

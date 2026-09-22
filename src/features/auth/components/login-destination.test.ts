@@ -9,12 +9,19 @@ describe("verified Product post-login destinations", () => {
     `/stores/${store}/products/${product}`,
     `/stores/${store}/products/new`,
     `/stores/${store}/products/${product}/edit`,
+    `/stores/${store}/products/${product}/variants`,
+    `/stores/${store}/products/${product}/variants/${product}`,
   ])("preserves implemented route %s without granting authority", (route) => {
     expect(loginDestination(route)).toBe(route);
   });
   it.each([
     `/stores/${store}/products/create`,
     `/stores/${store}/products/new/edit`,
+    `/stores/${store}/products/new/variants`,
+    `/stores/${store}/products/${product}/variants/new`,
+    `/stores/${store}/products/${product}/edit/${product}`,
+    `/stores/${store}/products/${product}/variants/${product}/inventory`,
+    `/stores/${store}/products/${product}/variants/${product}/pricing`,
     `/stores/${store}/products/${product}/publish`,
     `/stores/${store}/categories`,
     `/stores/invalid/products`,

@@ -81,6 +81,18 @@ function ProductDetail({ productUuid }: { productUuid: string }) {
       ) : (
         <>
           <ProductActions product={product} />
+          {product.type === "variant" &&
+            state.context?.permissions.includes("products.variants.view") && (
+              <div className="mb-5">
+                <Link
+                  href={`${href}/${product.id}/variants`}
+                  prefetch={false}
+                  className={buttonStyles()}
+                >
+                  Manage variants
+                </Link>
+              </div>
+            )}
           <DetailLayout
             sidebar={
               <>

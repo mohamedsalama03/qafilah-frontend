@@ -50,6 +50,15 @@ async function fixture(create = false) {
     permissions: ["products.view", "products.create", "products.update", "products.publish"],
   };
   const api: MerchantApi = {
+    listProductOptions: vi.fn(),
+    createProductOption: vi.fn(),
+    updateProductOption: vi.fn(),
+    createProductOptionValue: vi.fn(),
+    updateProductOptionValue: vi.fn(),
+    listProductVariants: vi.fn(),
+    createProductVariant: vi.fn(),
+    loadProductVariant: vi.fn(),
+    updateProductVariant: vi.fn(),
     loadProductInventory: vi.fn(),
     updateProductInventory: vi.fn(),
     authAdapter: {
