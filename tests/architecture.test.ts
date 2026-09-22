@@ -540,7 +540,7 @@ describe("permanent executable architecture boundaries", () => {
     );
   });
 
-  it("activates exactly published F2–F3-C and nine structural Variant contracts", () => {
+  it("activates exactly published F2–F3-D and two Variant inventory contracts", () => {
     const uuid = "15913d0d-10a1-40ed-bc6f-3e491f81a56f";
     expect(backendBaseline).toBe("6614690a3b24b39f45c7c1b9ed85c20ecb22cbbf");
     expect(Object.keys(merchantContracts).sort()).toEqual([
@@ -569,6 +569,8 @@ describe("permanent executable architecture boundaries", () => {
       "updateProductOption",
       "updateProductOptionValue",
       "updateProductVariant",
+      "updateVariantInventory",
+      "variantInventory",
     ]);
     expect([
       [merchantContracts.csrf.method, merchantContracts.csrf.path()],

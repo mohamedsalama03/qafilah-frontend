@@ -54,7 +54,7 @@ describe("published Option and Variant resource boundaries", () => {
       ["productVariant", "GET", `/variants/${id(5)}`],
       ["updateProductVariant", "PATCH", `/variants/${id(5)}`],
     ] as const;
-    expect(Object.keys(merchantContracts)).toHaveLength(25);
+    expect(Object.keys(merchantContracts)).toHaveLength(27);
     for (const [key, method, suffix] of expected) {
       const contract = merchantContracts[key];
       expect(contract.method).toBe(method);

@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MerchantProduct } from "@/features/products/contracts";
 import { useProduct } from "@/features/products/queries";
 import { useStores } from "@/features/stores/components/store-provider";
+import { useVariantInventory } from "@/features/variant-inventory/queries";
+import { useVariantInventoryMutation } from "@/features/variant-inventory/mutations";
 import { ApiError } from "@/lib/api/errors";
 import type { MerchantProductOption, MerchantVariant } from "../contracts";
 import { useVariantMutation, type VariantMutationState } from "../mutations";
@@ -17,6 +19,8 @@ vi.mock("../queries", () => ({
   useProductVariant: vi.fn(),
 }));
 vi.mock("../mutations", () => ({ useVariantMutation: vi.fn() }));
+vi.mock("@/features/variant-inventory/queries", () => ({ useVariantInventory: vi.fn() }));
+vi.mock("@/features/variant-inventory/mutations", () => ({ useVariantInventoryMutation: vi.fn() }));
 
 const id = (n: number) => `${n.toString(16).padStart(8, "0")}-1111-4111-8111-111111111111`;
 const product: MerchantProduct = {
@@ -115,6 +119,31 @@ function setup({
         refetch: vi.fn(),
       }) as unknown as ReturnType<typeof useProductVariant>,
   );
+  vi.mocked(useVariantInventory).mockImplementation((_productUuid, variantUuid) => {
+    const item = variants.find(({ id }) => id === variantUuid) ?? variant;
+    return {
+      data: { quantity: item.quantity, availability: item.availability },
+      error: null,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useVariantInventory>;
+  });
+  vi.mocked(useVariantInventoryMutation).mockReturnValue({
+    state: {
+      status: "idle",
+      slot: 0,
+      inventory: null,
+      product: null,
+      variant: null,
+      error: null,
+      refreshError: null,
+    },
+    isBlocked: false,
+    isPending: false,
+    execute: vi.fn(),
+    reconcile: vi.fn(),
+    reviewSuccess: vi.fn(),
+  });
   const mutation: ReturnType<typeof useVariantMutation> = {
     state: {
       status: "idle",
@@ -484,4 +513,58 @@ describe("structural feedback and focus priority", () => {
     expect(screen.getByRole("alert")).not.toHaveTextContent("SQLSTATE");
     expect(screen.getByRole("alert").parentElement).toHaveFocus();
   });
+});
+
+describe("Variant inventory detail integration", () => {
+  it("retains confirmed inventory feedback but disables structural edits when Variant refresh fails", () => {
+    setup({
+      permissions: [...allPermissions, "products.variants.inventory.update"],
+      variants: [variant],
+    });
+    vi.mocked(useProductVariant).mockReturnValue({
+      data: variant,
+      error: new ApiError("network"),
+      isFetching: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useProductVariant>);
+    vi.mocked(useVariantInventoryMutation).mockReturnValue({
+      state: {
+        status: "success",
+        slot: 0,
+        inventory: { quantity: 7, availability: "in_stock" },
+        product: null,
+        variant: null,
+        error: null,
+        refreshError: new ApiError("network"),
+      },
+      isBlocked: true,
+      isPending: false,
+      execute: vi.fn(),
+      reconcile: vi.fn(),
+      reviewSuccess: vi.fn(),
+    });
+    render(<VariantsScreen productUuid={product.id} variantUuid={variant.id} />);
+    expect(screen.getByText("Quantity saved.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Edit variant" })).toBeDisabled();
+    expect(screen.queryByRole("textbox", { name: "Quantity" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/latest product and variant details could not be confirmed/),
+    ).toBeVisible();
+  });
+  it.each(["not-found", "forbidden", "invalid-response"] as const)(
+    "hides cached detail on %s",
+    (kind) => {
+      setup({ variants: [variant] });
+      vi.mocked(useProductVariant).mockReturnValue({
+        data: variant,
+        error: new ApiError(kind),
+        isFetching: false,
+        refetch: vi.fn(),
+      } as unknown as ReturnType<typeof useProductVariant>);
+      render(<VariantsScreen productUuid={product.id} variantUuid={variant.id} />);
+      expect(screen.queryByRole("region", { name: "Inventory" })).not.toBeInTheDocument();
+      expect(useVariantInventory).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: "Edit variant" })).not.toBeInTheDocument();
+    },
+  );
 });

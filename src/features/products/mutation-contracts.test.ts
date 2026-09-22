@@ -67,7 +67,7 @@ const input = { storeUuid, productUuid, data };
 
 describe("five published Product mutation contracts", () => {
   it("activates exactly five writes in addition to the certified registry", () => {
-    expect(Object.keys(merchantContracts)).toHaveLength(25);
+    expect(Object.keys(merchantContracts)).toHaveLength(27);
     expect(
       operations.map((key) => [
         key,

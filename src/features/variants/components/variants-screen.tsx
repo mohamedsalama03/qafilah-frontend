@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { FormError } from "@/components/ui/field";
+import { VariantInventoryPanel } from "@/features/variant-inventory/components/variant-inventory-panel";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useStores } from "@/features/stores/components/store-provider";
@@ -15,7 +16,6 @@ import {
   ProductAccess,
   ProductLoading,
   RefreshAccess,
-  availabilityLabel,
 } from "@/features/products/components/product-shared";
 import { ApiError, normalizeUnexpectedError } from "@/lib/api/errors";
 import type { MerchantProductOption, MerchantVariant } from "../contracts";
@@ -206,6 +206,7 @@ function ConfigurationContent({
           options={options}
           canUpdate={canUpdate}
           blocked={blocked}
+          contextReadFailed={!!readError}
           onEdit={(variant) => setEditor({ kind: "variant.update", variant })}
         />
       ) : (
@@ -385,6 +386,7 @@ function VariantDetails({
   options,
   canUpdate,
   blocked,
+  contextReadFailed,
   onEdit,
 }: {
   product: MerchantProduct;
@@ -392,10 +394,20 @@ function VariantDetails({
   options: readonly MerchantProductOption[];
   canUpdate: boolean;
   blocked: boolean;
+  contextReadFailed: boolean;
   onEdit: (variant: MerchantVariant) => void;
 }) {
   const query = useProductVariant(product.id, variantUuid);
-  if (query.error)
+  // Keep confirmed inventory feedback visible if a projection refresh fails.
+  // Authority, identity, and malformed-response errors still fail closed.
+  if (
+    query.error &&
+    !(
+      query.data &&
+      query.error instanceof ApiError &&
+      ["network", "timeout", "server", "rate-limited"].includes(query.error.kind)
+    )
+  )
     return <CatalogError error={query.error} detail retry={() => void query.refetch()} />;
   if (!query.data) return <ProductLoading detail />;
   const variant = query.data;
@@ -404,7 +416,10 @@ function VariantDetails({
       title="Variant details"
       action={
         canUpdate && (
-          <Button onClick={() => onEdit(variant)} disabled={blocked || query.isFetching}>
+          <Button
+            onClick={() => onEdit(variant)}
+            disabled={blocked || query.isFetching || !!query.error}
+          >
             Edit variant
           </Button>
         )
@@ -444,18 +459,18 @@ function VariantDetails({
               {formatProductPrice({ type: "simple", price: variant.price })}
             </dd>
           </div>
-          <div>
-            <dt className="text-xs text-text-muted">Quantity</dt>
-            <dd className="mt-1 tabular-nums">
-              {variant.quantity === null ? "Not configured" : variant.quantity}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs text-text-muted">Availability</dt>
-            <dd className="mt-1">{availabilityLabel(variant.availability)}</dd>
-          </div>
         </dl>
       </div>
+      {query.error && (
+        <CatalogError error={query.error} detail retry={() => void query.refetch()} />
+      )}
+      <VariantInventoryPanel
+        key={variant.id}
+        product={product}
+        variant={variant}
+        productReadPending={blocked || query.isFetching}
+        productReadFailed={contextReadFailed || !!query.error}
+      />
     </Region>
   );
 }

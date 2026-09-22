@@ -214,8 +214,10 @@ test("real nonowner Products list uses one batched resource request and opaque n
 });
 
 test("real page size and sort changes reset opaque cursor navigation", async ({ page }) => {
+  const initialResponse = listResponse(page);
   await login(page, "browse");
   await listReady(page);
+  expect((await initialResponse).status()).toBe(200);
   await page.getByLabel("Page size", { exact: true }).selectOption("10");
   const resized = await apply(page);
   expect(resized.data).toHaveLength(10);

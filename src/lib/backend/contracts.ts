@@ -7,6 +7,13 @@ import {
 } from "../../features/inventory/contracts";
 import { inventoryPayloadSchema } from "../../features/inventory/model";
 import {
+  decodeVariantInventory,
+  type VariantInventory,
+  type VariantInventoryReadInput,
+  type UpdateVariantInventoryInput,
+} from "../../features/variant-inventory/contracts";
+import { variantInventoryPayloadSchema } from "../../features/variant-inventory/model";
+import {
   decodeMerchantProductOption,
   decodeMerchantVariant,
   decodeProductOptions,
@@ -177,6 +184,26 @@ const structuralErrorFields = [
 ] as const;
 
 export const merchantContracts = {
+  variantInventory: {
+    evidence: evidence(
+      "routes/api.php:448; Inventory VariantInventoryController/FindVariantInventoryQuery/ProductInventoryResource; Catalog PreAuthorizeCatalogRoute/ProductPolicy; CatalogVariantApiTest",
+    ),
+    method: "GET",
+    path: (input: VariantInventoryReadInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/variants/${catalogUuidSchema.parse(input.variantUuid)}/inventory`,
+    decode: decodeVariantInventory,
+  } satisfies EndpointContract<VariantInventoryReadInput, VariantInventory>,
+  updateVariantInventory: {
+    evidence: evidence(
+      "routes/api.php:450; Inventory UpdateVariantInventoryRequest/UpdateVariantInventoryAction/VariantInventoryController/ProductInventoryResource; CatalogMutationGuard; CatalogVariantApiTest/CatalogVariantConcurrencyTest",
+    ),
+    method: "PATCH",
+    path: (input: UpdateVariantInventoryInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/variants/${catalogUuidSchema.parse(input.variantUuid)}/inventory`,
+    body: (input: UpdateVariantInventoryInput) => variantInventoryPayloadSchema.parse(input.data),
+    decode: decodeVariantInventory,
+    decodeError: (payload: unknown) => validation(payload, ["quantity", "product", "variant"]),
+  } satisfies EndpointContract<UpdateVariantInventoryInput, VariantInventory>,
   productOptions: {
     evidence: evidence(
       "routes/api.php:418; Catalog ListProductOptionsQuery/MerchantProductOptionCollection/ProductPolicy",

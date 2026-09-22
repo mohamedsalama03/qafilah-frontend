@@ -26,7 +26,13 @@ export type ArchitectureRule =
   | "variant-mutation-boundary"
   | "variant-mutation-retry"
   | "variant-mutation-isolation"
-  | "variant-response-boundary";
+  | "variant-response-boundary"
+  | "variant-inventory-query-isolation"
+  | "variant-inventory-mutation-boundary"
+  | "variant-inventory-mutation-retry"
+  | "variant-inventory-mutation-isolation"
+  | "variant-inventory-absolute-quantity"
+  | "variant-inventory-response-boundary";
 
 export interface ArchitectureViolation {
   rule: ArchitectureRule;
@@ -322,7 +328,7 @@ export function inspectArchitecture(filename: string, source: string): Architect
     }
   }
 
-  // Published F2–F3-C contracts plus exactly nine structural Option/Value/Variant contracts.
+  // Published F2–F3-D contracts plus exactly two Variant inventory contracts.
   // Backend evidence for another capability does not authorize activating it here.
   const verifiedContracts: Record<string, readonly [string, string]> = {
     csrf: ["GET", "/sanctum/csrf-cookie"],
@@ -361,6 +367,14 @@ export function inspectArchitecture(filename: string, source: string): Architect
     updateProductVariant: [
       "PATCH",
       "/api/v1/stores/{value}/catalog/products/{value}/variants/{value}",
+    ],
+    variantInventory: [
+      "GET",
+      "/api/v1/stores/{value}/catalog/products/{value}/variants/{value}/inventory",
+    ],
+    updateVariantInventory: [
+      "PATCH",
+      "/api/v1/stores/{value}/catalog/products/{value}/variants/{value}/inventory",
     ],
   };
 
@@ -448,6 +462,12 @@ export function inspectArchitecture(filename: string, source: string): Architect
         expressionPath(properties.get("decode")!) !== "decodeProductInventory")
     )
       report("inventory-response-boundary", node);
+    if (
+      (entry === "variantInventory" || entry === "updateVariantInventory") &&
+      (!properties.get("decode") ||
+        expressionPath(properties.get("decode")!) !== "decodeVariantInventory")
+    )
+      report("variant-inventory-response-boundary", node);
     const variantDecoders: Record<string, string> = {
       productOptions: "decodeProductOptions",
       createProductOption: "decodeMerchantProductOption",
@@ -521,6 +541,10 @@ export function inspectArchitecture(filename: string, source: string): Architect
   const inventoryMutationSource = path === "src/features/inventory/mutations.ts";
   const inventoryQuerySource = path === "src/features/inventory/queries.ts";
   const inventoryDispatches: ts.Node[] = [];
+  const variantInventorySource = /^src\/features\/variant-inventory\//.test(path);
+  const variantInventoryMutationSource = path === "src/features/variant-inventory/mutations.ts";
+  const variantInventoryQuerySource = path === "src/features/variant-inventory/queries.ts";
+  const variantInventoryDispatches: ts.Node[] = [];
   const variantSource = /^src\/features\/variants\//.test(path);
   const variantMutationSource = path === "src/features/variants/mutations.ts";
   const variantQuerySource = path === "src/features/variants/queries.ts";
@@ -735,6 +759,94 @@ export function inspectArchitecture(filename: string, source: string): Architect
     return !!target && /(?:^|\.)(?:quantity|currentQuantity|previousQuantity)$/.test(target);
   }
 
+  function scopedVariantInventoryKey(expression: ts.Expression | undefined): boolean {
+    if (!expression) return false;
+    const key = resolveExpression(expression);
+    if (!ts.isCallExpression(key) || !key.arguments[0]) return false;
+    const origin = unwrap(key.arguments[0]);
+    if (
+      !(ts.isIdentifier(origin) && origin.text === "scope") &&
+      expressionPath(origin) !== "options.scope"
+    )
+      return false;
+    const target = expressionPath(key.expression) ?? key.expression.getText(file);
+    if (target === "variantInventoryKeys.detail" || target === "variantKeys.detail")
+      return key.arguments.length === 3;
+    if (target === "variantKeys.list" || target === "productKeys.detail")
+      return key.arguments.length === 2;
+    if (target !== "storeKeys.resource" || !key.arguments[1]) return false;
+    const allowed = [
+      "variant-inventory",
+      "product-variant",
+      "product-variants",
+      "product",
+      "products",
+    ];
+    const resource = key.arguments[1];
+    if (allowed.includes(literal(resource) ?? "")) return true;
+    if (ts.isIdentifier(resource)) {
+      for (let parent: ts.Node | undefined = key.parent; parent; parent = parent.parent) {
+        if (!ts.isForOfStatement(parent) || !ts.isVariableDeclarationList(parent.initializer))
+          continue;
+        const declaration = parent.initializer.declarations[0];
+        if (
+          !declaration ||
+          !ts.isIdentifier(declaration.name) ||
+          declaration.name.text !== resource.text
+        )
+          continue;
+        const entries = resolveExpression(parent.expression);
+        return (
+          ts.isArrayLiteralExpression(entries) &&
+          entries.elements.length > 0 &&
+          entries.elements.every((entry) => allowed.includes(literal(entry) ?? ""))
+        );
+      }
+    }
+    return false;
+  }
+
+  function inspectVariantInventoryKeyFactory(node: ts.VariableDeclaration): void {
+    if (
+      !ts.isIdentifier(node.name) ||
+      node.name.text !== "variantInventoryKeys" ||
+      !node.initializer
+    )
+      return;
+    const entries = objectFields(node.initializer);
+    const detail = entries?.get("detail");
+    const factory = detail ? resolveExpression(detail) : undefined;
+    if (
+      !entries ||
+      entries.size !== 1 ||
+      !factory ||
+      !ts.isArrowFunction(factory) ||
+      ts.isBlock(factory.body)
+    ) {
+      report("variant-inventory-query-isolation", node);
+      return;
+    }
+    const call = unwrap(factory.body);
+    const scopeParameter = factory.parameters[0]?.name;
+    const fields = ts.isCallExpression(call) ? objectFields(call.arguments[2]) : undefined;
+    if (
+      !ts.isCallExpression(call) ||
+      expressionPath(call.expression) !== "storeKeys.resource" ||
+      !scopeParameter ||
+      !ts.isIdentifier(scopeParameter) ||
+      call.arguments[0]?.getText(file) !== scopeParameter.text ||
+      literal(call.arguments[1]) !== "variant-inventory" ||
+      !fields ||
+      fields.size !== 2 ||
+      ["productUuid", "variantUuid"].some(
+        (parameter, index) =>
+          fields.get(parameter)?.getText(file) !==
+          factory.parameters[index + 1]?.name.getText(file),
+      )
+    )
+      report("variant-inventory-query-isolation", factory);
+  }
+
   function inspectProductKeyFactory(node: ts.VariableDeclaration): void {
     if (!ts.isIdentifier(node.name) || node.name.text !== "productKeys" || !node.initializer)
       return;
@@ -794,7 +906,8 @@ export function inspectArchitecture(filename: string, source: string): Architect
     if (ts.isVariableDeclaration(node)) inspectProductKeyFactory(node);
     if (ts.isVariableDeclaration(node)) inspectInventoryKeyFactory(node);
     if (ts.isVariableDeclaration(node)) inspectVariantKeyFactory(node);
-    if (inventorySource && ts.isBinaryExpression(node)) {
+    if (ts.isVariableDeclaration(node)) inspectVariantInventoryKeyFactory(node);
+    if ((inventorySource || variantInventorySource) && ts.isBinaryExpression(node)) {
       const operator = node.operatorToken.kind;
       if (
         ([
@@ -810,15 +923,25 @@ export function inspectArchitecture(filename: string, source: string): Architect
           ts.isNumericLiteral(unwrap(node.right)) &&
           unwrap(node.right).getText(file) === "0")
       )
-        report("inventory-absolute-quantity", node);
+        report(
+          variantInventorySource
+            ? "variant-inventory-absolute-quantity"
+            : "inventory-absolute-quantity",
+          node,
+        );
     }
     if (
-      inventorySource &&
+      (inventorySource || variantInventorySource) &&
       (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
       [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator) &&
       quantityReference(node.operand)
     )
-      report("inventory-absolute-quantity", node);
+      report(
+        variantInventorySource
+          ? "variant-inventory-absolute-quantity"
+          : "inventory-absolute-quantity",
+        node,
+      );
     if (
       ts.isBinaryExpression(node) &&
       [
@@ -891,7 +1014,8 @@ export function inspectArchitecture(filename: string, source: string): Architect
         path !== "src/features/products/queries.ts" &&
         !mutationSource &&
         !inventoryMutationSource &&
-        !variantMutationSource
+        !variantMutationSource &&
+        !(variantInventoryMutationSource && target.endsWith(".loadProduct"))
       )
         report("product-query-isolation", node);
       if (
@@ -916,9 +1040,42 @@ export function inspectArchitecture(filename: string, source: string): Architect
         target &&
         /\.(?:listProductOptions|listProductVariants|loadProductVariant)$/.test(target) &&
         !variantQuerySource &&
-        !variantMutationSource
+        !variantMutationSource &&
+        !(variantInventoryMutationSource && target.endsWith(".loadProductVariant"))
       )
         report("variant-query-isolation", node);
+      if (
+        target?.endsWith(".loadVariantInventory") &&
+        !variantInventoryQuerySource &&
+        !variantInventoryMutationSource
+      )
+        report("variant-inventory-query-isolation", node);
+      if (target?.endsWith(".updateVariantInventory")) {
+        if (!variantInventoryMutationSource) report("variant-inventory-mutation-boundary", node);
+        else variantInventoryDispatches.push(node);
+      }
+      if (
+        variantInventoryMutationSource &&
+        target &&
+        /^(?:(?:window|globalThis|self)\.)?(?:setTimeout|setInterval|requestAnimationFrame)$/.test(
+          target,
+        )
+      )
+        report("variant-inventory-mutation-retry", node);
+      if (
+        (variantInventoryMutationSource || variantInventoryQuerySource) &&
+        ts.isCallExpression(node)
+      ) {
+        if (target?.endsWith(".setQueryData") && !scopedVariantInventoryKey(node.arguments[0]))
+          report("variant-inventory-mutation-isolation", node);
+        if (
+          /\.(?:invalidateQueries|cancelQueries|removeQueries|resetQueries|refetchQueries|setQueriesData)$/.test(
+            target ?? "",
+          ) &&
+          !scopedVariantInventoryKey(objectFields(node.arguments[0])?.get("queryKey"))
+        )
+          report("variant-inventory-mutation-isolation", node);
+      }
       if (
         target &&
         /\.(?:createProductOption|updateProductOption|createProductOptionValue|updateProductOptionValue|createProductVariant|updateProductVariant)$/.test(
@@ -1039,6 +1196,12 @@ export function inspectArchitecture(filename: string, source: string): Architect
       const name = nameOf(node.name);
       if (
         name === "retry" &&
+        variantInventorySource &&
+        resolveExpression(node.initializer).kind !== ts.SyntaxKind.FalseKeyword
+      )
+        report("variant-inventory-mutation-retry", node);
+      if (
+        name === "retry" &&
         variantSource &&
         resolveExpression(node.initializer).kind !== ts.SyntaxKind.FalseKeyword
       )
@@ -1066,6 +1229,12 @@ export function inspectArchitecture(filename: string, source: string): Architect
         report("tenant-selector-authority", node);
       if (name === "queryKey") {
         const key = resolveExpression(node.initializer);
+        if (
+          ts.isArrayLiteralExpression(key) &&
+          (variantInventorySource ||
+            key.elements.some((item) => literal(item) === "variant-inventory"))
+        )
+          report("variant-inventory-query-isolation", node);
         if (
           ts.isArrayLiteralExpression(key) &&
           (variantSource ||
@@ -1103,6 +1272,9 @@ export function inspectArchitecture(filename: string, source: string): Architect
   // catch/finally retry path must not be introduced alongside it.
   if (inventoryDispatches.length > 1)
     inventoryDispatches.slice(1).forEach((node) => report("inventory-mutation-retry", node));
+  variantInventoryDispatches
+    .slice(1)
+    .forEach((node) => report("variant-inventory-mutation-retry", node));
   for (const calls of variantDispatches.values())
     calls.slice(1).forEach((node) => report("variant-mutation-retry", node));
   return violations;

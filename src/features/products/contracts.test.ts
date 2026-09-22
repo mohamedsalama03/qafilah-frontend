@@ -83,7 +83,9 @@ const setup = () => {
 
 describe("exact F3-A registry paths", () => {
   it("adds exactly three reviewed GET contracts with no bodies", () => {
-    expect(Object.keys(merchantContracts).slice(0, 18)).toEqual([
+    expect(Object.keys(merchantContracts).slice(0, 20)).toEqual([
+      "variantInventory",
+      "updateVariantInventory",
       "productOptions",
       "createProductOption",
       "updateProductOption",

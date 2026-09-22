@@ -5,6 +5,10 @@ import type {
 } from "../../features/inventory/contracts";
 import { inventoryPayloadSchema } from "../../features/inventory/model";
 import type {
+  VariantInventoryReadInput,
+  UpdateVariantInventoryInput,
+} from "../../features/variant-inventory/contracts";
+import type {
   CreateProductOptionInput,
   UpdateProductOptionInput,
   CreateProductOptionValueInput,
@@ -191,6 +195,18 @@ export function createMerchantApi(options: MerchantApiOptions) {
 
   return {
     authAdapter,
+    loadVariantInventory(input: VariantInventoryReadInput, signal?: AbortSignal) {
+      return requestStructuralRead(merchantContracts.variantInventory, input, signal);
+    },
+    updateVariantInventory(input: UpdateVariantInventoryInput, signal?: AbortSignal) {
+      return requestStructuralMutation(
+        merchantContracts.updateVariantInventory,
+        input,
+        // This identity-free resource confirms the submitted value, never a mutation receipt.
+        (result, request) => result.quantity === request.data.quantity,
+        signal,
+      );
+    },
     listProductOptions(input: ProductOptionsReadInput, signal?: AbortSignal) {
       return requestStructuralRead(merchantContracts.productOptions, input, signal);
     },

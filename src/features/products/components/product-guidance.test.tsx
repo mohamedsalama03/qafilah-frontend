@@ -78,6 +78,8 @@ function fixture(mode: "edit" | "create" = "edit") {
     updateProductOptionValue: vi.fn(),
     listProductVariants: vi.fn(),
     createProductVariant: vi.fn(),
+    loadVariantInventory: vi.fn(),
+    updateVariantInventory: vi.fn(),
     loadProductVariant: vi.fn(),
     updateProductVariant: vi.fn(),
     loadProductInventory: vi.fn(async () => ({
