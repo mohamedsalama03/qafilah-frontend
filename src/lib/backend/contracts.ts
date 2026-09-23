@@ -1,5 +1,30 @@
 import { z } from "zod";
 import {
+  decodeProductMedia,
+  decodeVariantMedia,
+  decodeProductMediaList,
+  decodeVariantMediaList,
+  decodeDeletedMedia,
+  type ProductMedia,
+  type VariantMedia,
+  type ProductMediaReadInput,
+  type VariantMediaReadInput,
+  type CreateProductMediaInput,
+  type CreateVariantMediaInput,
+  type UpdateProductMediaInput,
+  type UpdateVariantMediaInput,
+  type DeleteProductMediaInput,
+  type DeleteVariantMediaInput,
+} from "../../features/media/contracts";
+import {
+  mediaUploadFormData,
+  productMediaUploadSchema,
+  variantMediaUploadSchema,
+  productMediaUpdateSchema,
+  variantMediaUpdateSchema,
+} from "../../features/media/model";
+
+import {
   decodeProductInventory,
   type ProductInventory,
   type ProductInventoryReadInput,
@@ -64,7 +89,7 @@ import { hasAsciiControlCharacters } from "../api/control-characters";
 import { readLaravelValidationErrors } from "../api/errors";
 import type { ContractEvidence, EndpointContract, SafeErrorDetails } from "../api/types";
 
-export const backendBaseline = "6614690a3b24b39f45c7c1b9ed85c20ecb22cbbf";
+export const backendBaseline = "7cd52e549c2a657dc66643b36701356d1d024de5";
 const evidence = (source: string): ContractEvidence => ({
   source: `Qafilah backend ${backendBaseline}: ${source}`,
 });
@@ -184,6 +209,152 @@ const structuralErrorFields = [
 ] as const;
 
 export const merchantContracts = {
+  productMedia: {
+    evidence: evidence(
+      "routes/api.php; Catalog ListProductMediaQuery; MerchantProductMediaCollection/MerchantProductMediaResource; CatalogMediaApiTest",
+    ),
+    method: "GET",
+    successStatus: 200,
+    path: (input: ProductMediaReadInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/media`,
+    decode: decodeProductMediaList,
+  } satisfies EndpointContract<ProductMediaReadInput, ProductMedia[]>,
+  createProductMedia: {
+    evidence: evidence(
+      "routes/api.php; Catalog CreateProductMediaRequest/CreateProductMediaAction; MerchantProductMediaResource; CatalogMediaApiTest",
+    ),
+    method: "POST",
+    successStatus: 201,
+    path: (input: CreateProductMediaInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/media`,
+    multipartBody: (input: CreateProductMediaInput) =>
+      mediaUploadFormData(productMediaUploadSchema.parse(input.data)),
+    decode: decodeProductMedia,
+    decodeError: (payload: unknown) =>
+      validation(payload, [
+        "image",
+        "alt_text",
+        "position",
+        "is_primary",
+        "media",
+        "product",
+        "variant",
+      ]),
+  } satisfies EndpointContract<CreateProductMediaInput, ProductMedia>,
+  updateProductMedia: {
+    evidence: evidence(
+      "routes/api.php; Catalog UpdateProductMediaRequest/UpdateProductMediaAction; MerchantProductMediaResource; CatalogMediaApiTest",
+    ),
+    method: "PATCH",
+    successStatus: 200,
+    path: (input: UpdateProductMediaInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/media/${catalogUuidSchema.parse(input.mediaUuid)}`,
+    body: (input: UpdateProductMediaInput) => productMediaUpdateSchema.parse(input.data),
+    decode: decodeProductMedia,
+    decodeError: (payload: unknown) =>
+      validation(payload, [
+        "image",
+        "alt_text",
+        "position",
+        "is_primary",
+        "media",
+        "product",
+        "variant",
+      ]),
+  } satisfies EndpointContract<UpdateProductMediaInput, ProductMedia>,
+  deleteProductMedia: {
+    evidence: evidence(
+      "routes/api.php; Catalog DeleteProductMediaAction/ProductMediaController; MerchantProductMediaResource; CatalogMediaApiTest",
+    ),
+    method: "DELETE",
+    successStatus: 204,
+    path: (input: DeleteProductMediaInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/media/${catalogUuidSchema.parse(input.mediaUuid)}`,
+    decode: decodeDeletedMedia,
+    decodeError: (payload: unknown) =>
+      validation(payload, [
+        "image",
+        "alt_text",
+        "position",
+        "is_primary",
+        "media",
+        "product",
+        "variant",
+      ]),
+  } satisfies EndpointContract<DeleteProductMediaInput, void>,
+  variantMedia: {
+    evidence: evidence(
+      "routes/api.php; Catalog ListVariantMediaQuery; MerchantVariantMediaCollection/MerchantVariantMediaResource; CatalogMediaApiTest",
+    ),
+    method: "GET",
+    successStatus: 200,
+    path: (input: VariantMediaReadInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/variants/${catalogUuidSchema.parse(input.variantUuid)}/media`,
+    decode: decodeVariantMediaList,
+  } satisfies EndpointContract<VariantMediaReadInput, VariantMedia[]>,
+  createVariantMedia: {
+    evidence: evidence(
+      "routes/api.php; Catalog CreateVariantMediaRequest/CreateVariantMediaAction; MerchantVariantMediaResource; CatalogMediaApiTest",
+    ),
+    method: "POST",
+    successStatus: 201,
+    path: (input: CreateVariantMediaInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/variants/${catalogUuidSchema.parse(input.variantUuid)}/media`,
+    multipartBody: (input: CreateVariantMediaInput) =>
+      mediaUploadFormData(variantMediaUploadSchema.parse(input.data)),
+    decode: decodeVariantMedia,
+    decodeError: (payload: unknown) =>
+      validation(payload, [
+        "image",
+        "alt_text",
+        "position",
+        "is_primary",
+        "media",
+        "product",
+        "variant",
+      ]),
+  } satisfies EndpointContract<CreateVariantMediaInput, VariantMedia>,
+  updateVariantMedia: {
+    evidence: evidence(
+      "routes/api.php; Catalog UpdateVariantMediaRequest/UpdateVariantMediaAction; MerchantVariantMediaResource; CatalogMediaApiTest",
+    ),
+    method: "PATCH",
+    successStatus: 200,
+    path: (input: UpdateVariantMediaInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/variants/${catalogUuidSchema.parse(input.variantUuid)}/media/${catalogUuidSchema.parse(input.mediaUuid)}`,
+    body: (input: UpdateVariantMediaInput) => variantMediaUpdateSchema.parse(input.data),
+    decode: decodeVariantMedia,
+    decodeError: (payload: unknown) =>
+      validation(payload, [
+        "image",
+        "alt_text",
+        "position",
+        "is_primary",
+        "media",
+        "product",
+        "variant",
+      ]),
+  } satisfies EndpointContract<UpdateVariantMediaInput, VariantMedia>,
+  deleteVariantMedia: {
+    evidence: evidence(
+      "routes/api.php; Catalog DeleteVariantMediaAction/VariantMediaController; MerchantVariantMediaResource; CatalogMediaApiTest",
+    ),
+    method: "DELETE",
+    successStatus: 204,
+    path: (input: DeleteVariantMediaInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/variants/${catalogUuidSchema.parse(input.variantUuid)}/media/${catalogUuidSchema.parse(input.mediaUuid)}`,
+    decode: decodeDeletedMedia,
+    decodeError: (payload: unknown) =>
+      validation(payload, [
+        "image",
+        "alt_text",
+        "position",
+        "is_primary",
+        "media",
+        "product",
+        "variant",
+      ]),
+  } satisfies EndpointContract<DeleteVariantMediaInput, void>,
   variantInventory: {
     evidence: evidence(
       "routes/api.php:448; Inventory VariantInventoryController/FindVariantInventoryQuery/ProductInventoryResource; Catalog PreAuthorizeCatalogRoute/ProductPolicy; CatalogVariantApiTest",

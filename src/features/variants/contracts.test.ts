@@ -54,12 +54,12 @@ describe("published Option and Variant resource boundaries", () => {
       ["productVariant", "GET", `/variants/${id(5)}`],
       ["updateProductVariant", "PATCH", `/variants/${id(5)}`],
     ] as const;
-    expect(Object.keys(merchantContracts)).toHaveLength(27);
+    expect(Object.keys(merchantContracts)).toHaveLength(35);
     for (const [key, method, suffix] of expected) {
       const contract = merchantContracts[key];
       expect(contract.method).toBe(method);
       expect(contract.path(input as never)).toBe(prefix + suffix);
-      expect(contract.evidence.source).toContain("6614690a3b24b39f45c7c1b9ed85c20ecb22cbbf");
+      expect(contract.evidence.source).toContain("7cd52e549c2a657dc66643b36701356d1d024de5");
       if (method === "GET") expect(contract).not.toHaveProperty("body");
     }
   });

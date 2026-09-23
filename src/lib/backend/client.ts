@@ -1,3 +1,17 @@
+import type {
+  ProductMediaReadInput,
+  VariantMediaReadInput,
+  CreateProductMediaInput,
+  CreateVariantMediaInput,
+  UpdateProductMediaInput,
+  UpdateVariantMediaInput,
+  DeleteProductMediaInput,
+  DeleteVariantMediaInput,
+} from "../../features/media/contracts";
+import {
+  normalizeCreateProductMediaPayload,
+  normalizeCreateVariantMediaPayload,
+} from "../../features/media/model";
 import { createApiClient } from "../api/client";
 import type {
   ProductInventoryReadInput,
@@ -127,6 +141,39 @@ export function createMerchantApi(options: MerchantApiOptions) {
     return result;
   }
 
+  async function requestMediaUpload<Input extends { data: unknown }, Output>(
+    contract: EndpointContract<Input, Output>,
+    input: Input,
+    normalize: (data: unknown) => Input["data"],
+    signal?: AbortSignal,
+  ): Promise<Output> {
+    let requestInput: Input;
+    try {
+      // Files are immutable; metadata and the exact nested target are captured before CSRF.
+      requestInput = { ...input, data: normalize(input.data) };
+      contract.path(requestInput);
+    } catch {
+      throw new ApiError("configuration");
+    }
+    await prepareCsrf(signal);
+    return api.request(contract, requestInput, { signal });
+  }
+
+  async function requestMediaDelete<Input extends ProductMediaReadInput>(
+    contract: EndpointContract<Input, void>,
+    input: Input,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const requestInput = { ...input };
+    try {
+      contract.path(requestInput);
+    } catch {
+      throw new ApiError("configuration");
+    }
+    await prepareCsrf(signal);
+    return api.request(contract, requestInput, { signal });
+  }
+
   async function requestProductMutation<Input>(
     contract: EndpointContract<Input, MerchantProduct>,
     input: Input,
@@ -195,6 +242,50 @@ export function createMerchantApi(options: MerchantApiOptions) {
 
   return {
     authAdapter,
+    listProductMedia(input: ProductMediaReadInput, signal?: AbortSignal) {
+      return requestStructuralRead(merchantContracts.productMedia, input, signal);
+    },
+    createProductMedia(input: CreateProductMediaInput, signal?: AbortSignal) {
+      return requestMediaUpload(
+        merchantContracts.createProductMedia,
+        input,
+        normalizeCreateProductMediaPayload,
+        signal,
+      );
+    },
+    updateProductMedia(input: UpdateProductMediaInput, signal?: AbortSignal) {
+      return requestStructuralMutation(
+        merchantContracts.updateProductMedia,
+        input,
+        (result, request) => result.id === request.mediaUuid.toLowerCase(),
+        signal,
+      );
+    },
+    deleteProductMedia(input: DeleteProductMediaInput, signal?: AbortSignal) {
+      return requestMediaDelete(merchantContracts.deleteProductMedia, input, signal);
+    },
+    listVariantMedia(input: VariantMediaReadInput, signal?: AbortSignal) {
+      return requestStructuralRead(merchantContracts.variantMedia, input, signal);
+    },
+    createVariantMedia(input: CreateVariantMediaInput, signal?: AbortSignal) {
+      return requestMediaUpload(
+        merchantContracts.createVariantMedia,
+        input,
+        normalizeCreateVariantMediaPayload,
+        signal,
+      );
+    },
+    updateVariantMedia(input: UpdateVariantMediaInput, signal?: AbortSignal) {
+      return requestStructuralMutation(
+        merchantContracts.updateVariantMedia,
+        input,
+        (result, request) => result.id === request.mediaUuid.toLowerCase(),
+        signal,
+      );
+    },
+    deleteVariantMedia(input: DeleteVariantMediaInput, signal?: AbortSignal) {
+      return requestMediaDelete(merchantContracts.deleteVariantMedia, input, signal);
+    },
     loadVariantInventory(input: VariantInventoryReadInput, signal?: AbortSignal) {
       return requestStructuralRead(merchantContracts.variantInventory, input, signal);
     },

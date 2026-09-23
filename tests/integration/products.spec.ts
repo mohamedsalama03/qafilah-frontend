@@ -276,8 +276,16 @@ test("real filters perform name prefix status category and deterministic sorting
 test("real historical creation and updated ranges find older Products without widening the default window", async ({
   page,
 }) => {
+  const initialResponse = listResponse(page);
   await login(page, "browse");
   await listReady(page);
+  const initial = await initialResponse;
+  expect(initial.status()).toBe(200);
+  const initialProducts = (await initial.json()).data as ProductFixture[];
+  expect(initialProducts.length).toBeGreaterThan(0);
+  await expect(
+    page.getByRole("link", { name: initialProducts[0].name, exact: true }),
+  ).toBeVisible();
   await expect(page.locator("body")).not.toContainText(fixtures.historic.name);
   await page.getByText("Date and category filters", { exact: true }).click();
   await page.getByLabel("Created from", { exact: true }).fill(fixtures.historic.from);
@@ -324,7 +332,11 @@ test("real Product detail renders plain text and exact simple and Variant commer
           /\/(pricing|inventory|variants|media)(?:\?|$)/.test(entry.path) &&
           !(
             entry.method === "GET" &&
-            entry.path === `/api/v1/stores/${store.id}/catalog/products/${product.id}/inventory`
+            ["inventory", "media"].some(
+              (resource) =>
+                entry.path ===
+                `/api/v1/stores/${store.id}/catalog/products/${product.id}/${resource}`,
+            )
           ),
       ),
   ).toBe(false);

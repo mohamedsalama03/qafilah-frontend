@@ -7,6 +7,7 @@ import { DetailLayout } from "@/components/ui/detail-layout";
 import { PageHeader } from "@/components/ui/page-header";
 import { useStores } from "@/features/stores/components/store-provider";
 import { ProductInventoryPanel } from "@/features/inventory/components/product-inventory-panel";
+import { MediaPanel } from "@/features/media/components/media-panel";
 import { ApiError } from "@/lib/api/errors";
 import { useProduct } from "../queries";
 import { catalogUuidSchema, formatProductPrice } from "../model";
@@ -64,6 +65,13 @@ function ProductDetail({ productUuid }: { productUuid: string }) {
       />
       {inventoryProduct?.type === "simple" && (
         <ProductInventoryPanel
+          product={inventoryProduct}
+          productReadPending={query.isFetching}
+          productReadFailed={!!query.error}
+        />
+      )}
+      {inventoryProduct && (
+        <MediaPanel
           product={inventoryProduct}
           productReadPending={query.isFetching}
           productReadFailed={!!query.error}

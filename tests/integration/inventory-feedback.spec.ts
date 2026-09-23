@@ -90,7 +90,13 @@ test.afterEach(async ({ page }, info) => {
   expect(errors.get(page)).toEqual([]);
   expect(traffic.get(page)!.some((entry) => entry.bearer)).toBe(false);
   expect(
-    traffic.get(page)!.some((entry) => /\/(pricing|media|variants|options)\b/.test(entry.path)),
+    traffic
+      .get(page)!
+      .some(
+        (entry) =>
+          /\/(pricing|media|variants|options)\b/.test(entry.path) &&
+          !(entry.method === "GET" && /\/products\/[^/]+\/media$/.test(entry.path)),
+      ),
   ).toBe(false);
   for (const entry of writes(page)) {
     expect(entry.csrf).toBe(true);

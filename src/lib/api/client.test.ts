@@ -353,3 +353,103 @@ describe("cancellation and unknown mutation outcome", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 });
+
+describe("explicit multipart transport", () => {
+  const upload = (): EndpointContract<{ label: string }, unknown> => ({
+    evidence,
+    method: "POST",
+    path: () => "/test-contract",
+    decode: (value) => value,
+    multipartBody: (input) => {
+      const body = new FormData();
+      body.append("label", input.label);
+      body.append("image", new File(["fixture"], "fixture.png", { type: "image/png" }));
+      return body;
+    },
+  });
+  it("snapshots multipart before CSRF and preserves central request controls", async () => {
+    let release!: (value: string) => void;
+    const getToken = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json({ accepted: true }));
+    const api = createApiClient({ apiOrigin: origin, fetch: fetcher, csrf: { ...csrf, getToken } });
+    const input = { label: "original" };
+    const pending = api.request(upload(), input);
+    input.label = "edited";
+    release("token");
+    await pending;
+    const request = fetcher.mock.calls[0]![1]!;
+    expect((request.body as FormData).get("label")).toBe("original");
+    expect(new Headers(request.headers).has("Content-Type")).toBe(false);
+    expect(new Headers(request.headers).get(csrf.headerName)).toBe("token");
+    expect(request).toMatchObject({
+      credentials: "include",
+      mode: "cors",
+      redirect: "error",
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+    });
+    expect(request.signal).toBeInstanceOf(AbortSignal);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it.each(["GET", "HEAD"] as const)(
+    "rejects multipart %s before token or fetch",
+    async (method) => {
+      const fetcher = vi.fn<typeof fetch>();
+      const getToken = vi.fn(csrf.getToken);
+      const api = createApiClient({
+        apiOrigin: origin,
+        fetch: fetcher,
+        csrf: { ...csrf, getToken },
+      });
+      await expect(api.request({ ...upload(), method }, { label: "x" })).rejects.toMatchObject({
+        kind: "configuration",
+      });
+      expect(getToken).not.toHaveBeenCalled();
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+  it("rejects ambiguous JSON plus multipart contract", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const api = createApiClient({ apiOrigin: origin, fetch: fetcher, csrf });
+    await expect(
+      api.request({ ...upload(), body: () => ({ secret: "no" }) }, { label: "x" }),
+    ).rejects.toMatchObject({ kind: "configuration" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it.each([401, 403, 419, 422, 429, 500])(
+    "normalizes multipart HTTP %i without replay",
+    async (status) => {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json({ message: "private" }, status));
+      const api = createApiClient({ apiOrigin: origin, fetch: fetcher, csrf });
+      await expect(api.request(upload(), { label: "x" })).rejects.toMatchObject({
+        status,
+        mutationOutcome: status >= 500 ? "unknown" : "not-applicable",
+      });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
+  it("keeps multipart post-dispatch cancellation uncertain with no replay", async () => {
+    const controller = new AbortController();
+    const fetcher = vi.fn<typeof fetch>(() => new Promise(() => {}));
+    const api = createApiClient({ apiOrigin: origin, fetch: fetcher, csrf });
+    const pending = api.request(upload(), { label: "x" }, { signal: controller.signal });
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ kind: "cancelled", mutationOutcome: "unknown" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("keeps multipart timeout uncertain with no replay", async () => {
+    const fetcher = vi.fn<typeof fetch>(() => new Promise(() => {}));
+    const api = createApiClient({ apiOrigin: origin, fetch: fetcher, csrf });
+    await expect(api.request(upload(), { label: "x" }, { timeoutMs: 5 })).rejects.toMatchObject({
+      kind: "timeout",
+      mutationOutcome: "unknown",
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+});

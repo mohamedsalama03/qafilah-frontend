@@ -70,7 +70,11 @@ export function createApiClient(options: ApiClientOptions) {
       const url = resolveApiUrl(apiOrigin, contract.path(input));
       const mutation = !["GET", "HEAD"].includes(contract.method);
       if (mutation && !options.csrf) throw new ApiError("configuration");
-      if (!mutation && contract.body) throw new ApiError("configuration");
+      if (
+        (!mutation && (contract.body || contract.multipartBody)) ||
+        (contract.body && contract.multipartBody)
+      )
+        throw new ApiError("configuration");
       const timeoutMs = request.timeoutMs ?? defaultTimeout;
       validateTimeout(timeoutMs);
       const controller = new AbortController();
@@ -86,6 +90,16 @@ export function createApiClient(options: ApiClientOptions) {
       try {
         if (controller.signal.aborted) throw new ApiError("cancelled");
         const headers = new Headers({ Accept: "application/json" });
+        // Capture once before CSRF can yield; a multipart request never receives a JSON header.
+        const body = contract.multipartBody
+          ? contract.multipartBody(input)
+          : contract.body
+            ? JSON.stringify(contract.body(input))
+            : undefined;
+        if (contract.multipartBody && !(body instanceof FormData))
+          throw new ApiError("configuration");
+        if (body !== undefined && !contract.multipartBody)
+          headers.set("Content-Type", "application/json");
         if (mutation && options.csrf) {
           const token = await abortable(
             options.csrf.getToken(controller.signal),
@@ -100,8 +114,6 @@ export function createApiClient(options: ApiClientOptions) {
             throw new ApiError("configuration");
           headers.set(options.csrf.headerName, token);
         }
-        const body = contract.body ? JSON.stringify(contract.body(input)) : undefined;
-        if (body !== undefined) headers.set("Content-Type", "application/json");
         if (controller.signal.aborted) throw new ApiError("cancelled");
         sent = true;
         const response = await abortable(
@@ -176,6 +188,8 @@ export function createApiClient(options: ApiClientOptions) {
         }
         if (controller.signal.aborted) throw new ApiError("cancelled");
         try {
+          if (contract.successStatus !== undefined && response.status !== contract.successStatus)
+            throw new Error("Unexpected successful status.");
           return contract.decode(payload);
         } catch {
           throw new ApiError("invalid-response", {

@@ -32,7 +32,14 @@ export type ArchitectureRule =
   | "variant-inventory-mutation-retry"
   | "variant-inventory-mutation-isolation"
   | "variant-inventory-absolute-quantity"
-  | "variant-inventory-response-boundary";
+  | "variant-inventory-response-boundary"
+  | "media-query-isolation"
+  | "media-mutation-boundary"
+  | "media-mutation-retry"
+  | "media-mutation-isolation"
+  | "media-response-boundary"
+  | "media-multipart-boundary"
+  | "media-url-boundary";
 
 export interface ArchitectureViolation {
   rule: ArchitectureRule;
@@ -328,9 +335,26 @@ export function inspectArchitecture(filename: string, source: string): Architect
     }
   }
 
-  // Published F2–F3-D contracts plus exactly two Variant inventory contracts.
+  // Published F2–F3-E contracts plus exactly eight Product/Variant media contracts.
   // Backend evidence for another capability does not authorize activating it here.
   const verifiedContracts: Record<string, readonly [string, string]> = {
+    productMedia: ["GET", "/api/v1/stores/{value}/catalog/products/{value}/media"],
+    createProductMedia: ["POST", "/api/v1/stores/{value}/catalog/products/{value}/media"],
+    updateProductMedia: ["PATCH", "/api/v1/stores/{value}/catalog/products/{value}/media/{value}"],
+    deleteProductMedia: ["DELETE", "/api/v1/stores/{value}/catalog/products/{value}/media/{value}"],
+    variantMedia: ["GET", "/api/v1/stores/{value}/catalog/products/{value}/variants/{value}/media"],
+    createVariantMedia: [
+      "POST",
+      "/api/v1/stores/{value}/catalog/products/{value}/variants/{value}/media",
+    ],
+    updateVariantMedia: [
+      "PATCH",
+      "/api/v1/stores/{value}/catalog/products/{value}/variants/{value}/media/{value}",
+    ],
+    deleteVariantMedia: [
+      "DELETE",
+      "/api/v1/stores/{value}/catalog/products/{value}/variants/{value}/media/{value}",
+    ],
     csrf: ["GET", "/sanctum/csrf-cookie"],
     login: ["POST", "/api/v1/auth/login"],
     identity: ["GET", "/api/v1/me"],
@@ -450,7 +474,7 @@ export function inspectArchitecture(filename: string, source: string): Architect
       literal(method) !== expected[0] ||
       !pathExpression ||
       contractPath(pathExpression) !== expected[1] ||
-      (expected[0] === "GET" && properties.has("body")) ||
+      (expected[0] === "GET" && (properties.has("body") || properties.has("multipartBody"))) ||
       (["publishProduct", "unpublishProduct", "archiveProduct"].includes(entry ?? "") &&
         properties.has("body")) ||
       node.properties.some(ts.isSpreadAssignment)
@@ -468,6 +492,37 @@ export function inspectArchitecture(filename: string, source: string): Architect
         expressionPath(properties.get("decode")!) !== "decodeVariantInventory")
     )
       report("variant-inventory-response-boundary", node);
+    const mediaDecoders: Record<string, readonly [string, number]> = {
+      productMedia: ["decodeProductMediaList", 200],
+      createProductMedia: ["decodeProductMedia", 201],
+      updateProductMedia: ["decodeProductMedia", 200],
+      deleteProductMedia: ["decodeDeletedMedia", 204],
+      variantMedia: ["decodeVariantMediaList", 200],
+      createVariantMedia: ["decodeVariantMedia", 201],
+      updateVariantMedia: ["decodeVariantMedia", 200],
+      deleteVariantMedia: ["decodeDeletedMedia", 204],
+    };
+    const mediaDecoder = mediaDecoders[entry ?? ""];
+    if (mediaDecoder) {
+      const status = properties.get("successStatus");
+      if (
+        !properties.get("decode") ||
+        expressionPath(properties.get("decode")!) !== mediaDecoder[0] ||
+        !status ||
+        !ts.isNumericLiteral(unwrap(status)) ||
+        Number(status.getText(file)) !== mediaDecoder[1]
+      )
+        report("media-response-boundary", node);
+      const upload = entry?.startsWith("create");
+      if (
+        upload
+          ? !properties.has("multipartBody") || properties.has("body")
+          : properties.has("multipartBody")
+      )
+        report("media-multipart-boundary", node);
+      if (entry?.startsWith("delete") && properties.has("body"))
+        report("media-multipart-boundary", node);
+    }
     const variantDecoders: Record<string, string> = {
       productOptions: "decodeProductOptions",
       createProductOption: "decodeMerchantProductOption",
@@ -535,6 +590,10 @@ export function inspectArchitecture(filename: string, source: string): Architect
     );
   }
 
+  const mediaSource = /^src\/features\/media\//.test(path);
+  const mediaMutationSource = path === "src/features/media/mutations.ts";
+  const mediaQuerySource = path === "src/features/media/queries.ts";
+  const mediaDispatches = new Map<string, ts.Node[]>();
   const productResources = new Set(["products", "product", "product-categories"]);
   const mutationSource = path === "src/features/products/mutations.ts";
   const inventorySource = /^src\/features\/inventory\//.test(path);
@@ -847,6 +906,85 @@ export function inspectArchitecture(filename: string, source: string): Architect
       report("variant-inventory-query-isolation", factory);
   }
 
+  function scopedMediaKey(expression: ts.Expression | undefined): boolean {
+    if (!expression) return false;
+    const key = resolveExpression(expression);
+    if (!ts.isCallExpression(key) || !key.arguments[0]) return false;
+    const origin = unwrap(key.arguments[0]);
+    if (
+      !(ts.isIdentifier(origin) && origin.text === "scope") &&
+      expressionPath(origin) !== "options.scope"
+    )
+      return false;
+    const target = expressionPath(key.expression) ?? key.expression.getText(file);
+    if (target === "mediaKeys.list")
+      return (
+        key.arguments.length === 2 &&
+        !!key.arguments[1] &&
+        !ts.isObjectLiteralExpression(unwrap(key.arguments[1]))
+      );
+    if (target === "variantKeys.detail") return key.arguments.length === 3;
+    if (target === "variantKeys.list" || target === "productKeys.detail")
+      return key.arguments.length === 2;
+    if (target !== "storeKeys.resource" || !key.arguments[1]) return false;
+    const allowed = ["media", "product-variant", "product-variants", "product", "products"];
+    const resource = key.arguments[1];
+    if (allowed.includes(literal(resource) ?? "")) return true;
+    if (ts.isIdentifier(resource)) {
+      for (let parent: ts.Node | undefined = key.parent; parent; parent = parent.parent) {
+        if (!ts.isForOfStatement(parent) || !ts.isVariableDeclarationList(parent.initializer))
+          continue;
+        const declaration = parent.initializer.declarations[0];
+        if (
+          !declaration ||
+          !ts.isIdentifier(declaration.name) ||
+          declaration.name.text !== resource.text
+        )
+          continue;
+        const entries = resolveExpression(parent.expression);
+        return (
+          ts.isArrayLiteralExpression(entries) &&
+          entries.elements.length > 0 &&
+          entries.elements.every((entry) => allowed.includes(literal(entry) ?? ""))
+        );
+      }
+    }
+    return false;
+  }
+
+  function inspectMediaKeyFactory(node: ts.VariableDeclaration): void {
+    if (!ts.isIdentifier(node.name) || node.name.text !== "mediaKeys" || !node.initializer) return;
+    const entries = objectFields(node.initializer);
+    const list = entries?.get("list");
+    const factory = list ? resolveExpression(list) : undefined;
+    if (
+      !entries ||
+      entries.size !== 1 ||
+      !factory ||
+      !ts.isArrowFunction(factory) ||
+      ts.isBlock(factory.body)
+    ) {
+      report("media-query-isolation", node);
+      return;
+    }
+    const call = unwrap(factory.body);
+    const scopeParameter = factory.parameters[0]?.name;
+    const targetParameter = factory.parameters[1]?.name;
+    if (
+      !ts.isCallExpression(call) ||
+      expressionPath(call.expression) !== "storeKeys.resource" ||
+      !scopeParameter ||
+      !ts.isIdentifier(scopeParameter) ||
+      call.arguments[0]?.getText(file) !== scopeParameter.text ||
+      literal(call.arguments[1]) !== "media" ||
+      !targetParameter ||
+      !ts.isIdentifier(targetParameter) ||
+      call.arguments[2]?.getText(file) !== targetParameter.text ||
+      call.arguments.length !== 3
+    )
+      report("media-query-isolation", factory);
+  }
+
   function inspectProductKeyFactory(node: ts.VariableDeclaration): void {
     if (!ts.isIdentifier(node.name) || node.name.text !== "productKeys" || !node.initializer)
       return;
@@ -903,6 +1041,7 @@ export function inspectArchitecture(filename: string, source: string): Architect
 
   visit(file, (node) => {
     if (ts.isObjectLiteralExpression(node)) inspectContract(node);
+    if (ts.isVariableDeclaration(node)) inspectMediaKeyFactory(node);
     if (ts.isVariableDeclaration(node)) inspectProductKeyFactory(node);
     if (ts.isVariableDeclaration(node)) inspectInventoryKeyFactory(node);
     if (ts.isVariableDeclaration(node)) inspectVariantKeyFactory(node);
@@ -1010,12 +1149,69 @@ export function inspectArchitecture(filename: string, source: string): Architect
       const target = expressionPath(node.expression);
       if (
         target &&
+        /\.(?:listProductMedia|listVariantMedia)$/.test(target) &&
+        !mediaQuerySource &&
+        !mediaMutationSource
+      )
+        report("media-query-isolation", node);
+      if (
+        target &&
+        /\.(?:createProductMedia|updateProductMedia|deleteProductMedia|createVariantMedia|updateVariantMedia|deleteVariantMedia)$/.test(
+          target,
+        )
+      ) {
+        if (!mediaMutationSource) report("media-mutation-boundary", node);
+        else {
+          const name = target.split(".").at(-1)!;
+          const calls = mediaDispatches.get(name) ?? [];
+          calls.push(node);
+          mediaDispatches.set(name, calls);
+        }
+      }
+      if (
+        mediaMutationSource &&
+        target &&
+        /^(?:(?:window|globalThis|self)\.)?(?:setTimeout|setInterval|requestAnimationFrame)$/.test(
+          target,
+        )
+      )
+        report("media-mutation-retry", node);
+      if ((mediaMutationSource || mediaQuerySource) && ts.isCallExpression(node)) {
+        if (target?.endsWith(".setQueryData") && !scopedMediaKey(node.arguments[0]))
+          report("media-mutation-isolation", node);
+        if (
+          /\.(?:invalidateQueries|cancelQueries|removeQueries|resetQueries|refetchQueries|setQueriesData)$/.test(
+            target ?? "",
+          ) &&
+          !scopedMediaKey(objectFields(node.arguments[0])?.get("queryKey"))
+        )
+          report("media-mutation-isolation", node);
+      }
+      if (mediaSource && ts.isNewExpression(node) && target === "URL")
+        report("media-url-boundary", node);
+      if (
+        mediaSource &&
+        ts.isNewExpression(node) &&
+        target === "FormData" &&
+        path !== "src/features/media/model.ts"
+      )
+        report("media-multipart-boundary", node);
+      if (
+        target &&
+        /\.(?:set|append|setRequestHeader)$/.test(target) &&
+        literal(node.arguments?.[0])?.toLowerCase() === "content-type" &&
+        /multipart\/form-data/i.test(literal(node.arguments?.[1]) ?? "")
+      )
+        report("media-multipart-boundary", node);
+      if (
+        target &&
         /\.(?:listProducts|loadProduct|listCategories)$/.test(target) &&
         path !== "src/features/products/queries.ts" &&
         !mutationSource &&
         !inventoryMutationSource &&
         !variantMutationSource &&
-        !(variantInventoryMutationSource && target.endsWith(".loadProduct"))
+        !(variantInventoryMutationSource && target.endsWith(".loadProduct")) &&
+        !(mediaMutationSource && target.endsWith(".loadProduct"))
       )
         report("product-query-isolation", node);
       if (
@@ -1041,7 +1237,8 @@ export function inspectArchitecture(filename: string, source: string): Architect
         /\.(?:listProductOptions|listProductVariants|loadProductVariant)$/.test(target) &&
         !variantQuerySource &&
         !variantMutationSource &&
-        !(variantInventoryMutationSource && target.endsWith(".loadProductVariant"))
+        !(variantInventoryMutationSource && target.endsWith(".loadProductVariant")) &&
+        !(mediaMutationSource && target.endsWith(".loadProductVariant"))
       )
         report("variant-query-isolation", node);
       if (
@@ -1196,6 +1393,12 @@ export function inspectArchitecture(filename: string, source: string): Architect
       const name = nameOf(node.name);
       if (
         name === "retry" &&
+        mediaSource &&
+        resolveExpression(node.initializer).kind !== ts.SyntaxKind.FalseKeyword
+      )
+        report("media-mutation-retry", node);
+      if (
+        name === "retry" &&
         variantInventorySource &&
         resolveExpression(node.initializer).kind !== ts.SyntaxKind.FalseKeyword
       )
@@ -1229,6 +1432,11 @@ export function inspectArchitecture(filename: string, source: string): Architect
         report("tenant-selector-authority", node);
       if (name === "queryKey") {
         const key = resolveExpression(node.initializer);
+        if (
+          ts.isArrayLiteralExpression(key) &&
+          (mediaSource || key.elements.some((item) => literal(item) === "media"))
+        )
+          report("media-query-isolation", node);
         if (
           ts.isArrayLiteralExpression(key) &&
           (variantInventorySource ||
@@ -1272,6 +1480,8 @@ export function inspectArchitecture(filename: string, source: string): Architect
   // catch/finally retry path must not be introduced alongside it.
   if (inventoryDispatches.length > 1)
     inventoryDispatches.slice(1).forEach((node) => report("inventory-mutation-retry", node));
+  for (const calls of mediaDispatches.values())
+    calls.slice(1).forEach((node) => report("media-mutation-retry", node));
   variantInventoryDispatches
     .slice(1)
     .forEach((node) => report("variant-inventory-mutation-retry", node));

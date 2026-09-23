@@ -83,7 +83,15 @@ const setup = () => {
 
 describe("exact F3-A registry paths", () => {
   it("adds exactly three reviewed GET contracts with no bodies", () => {
-    expect(Object.keys(merchantContracts).slice(0, 20)).toEqual([
+    expect(Object.keys(merchantContracts).slice(0, 28)).toEqual([
+      "productMedia",
+      "createProductMedia",
+      "updateProductMedia",
+      "deleteProductMedia",
+      "variantMedia",
+      "createVariantMedia",
+      "updateVariantMedia",
+      "deleteVariantMedia",
       "variantInventory",
       "updateVariantInventory",
       "productOptions",
@@ -112,7 +120,7 @@ describe("exact F3-A registry paths", () => {
     ]) {
       expect(contract.method).toBe("GET");
       expect(contract).not.toHaveProperty("body");
-      expect(contract.evidence.source).toContain("6614690a3b24b39f45c7c1b9ed85c20ecb22cbbf");
+      expect(contract.evidence.source).toContain("7cd52e549c2a657dc66643b36701356d1d024de5");
     }
   });
   it("encodes opaque cursors and reviewed criteria without decoding or inventing pages", () => {

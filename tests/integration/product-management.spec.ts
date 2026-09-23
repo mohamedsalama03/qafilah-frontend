@@ -133,7 +133,7 @@ test.afterEach(async ({ page }, info) => {
           ) &&
           !(
             request.method === "GET" &&
-            /^\/api\/v1\/stores\/[a-f0-9-]+\/catalog\/products\/[a-f0-9-]+\/inventory$/.test(
+            /^\/api\/v1\/stores\/[a-f0-9-]+\/catalog\/products\/[a-f0-9-]+\/(inventory|media)$/.test(
               request.path,
             )
           ),

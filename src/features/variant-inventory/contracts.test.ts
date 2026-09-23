@@ -32,7 +32,7 @@ function setup() {
 
 describe("published Variant inventory contracts", () => {
   it("registers only the two confirmed nested inventory contracts", () => {
-    expect(Object.keys(merchantContracts)).toHaveLength(27);
+    expect(Object.keys(merchantContracts)).toHaveLength(35);
     expect(Object.keys(merchantContracts).filter((key) => /variantinventory/i.test(key))).toEqual([
       "variantInventory",
       "updateVariantInventory",
@@ -42,7 +42,7 @@ describe("published Variant inventory contracts", () => {
     for (const key of ["variantInventory", "updateVariantInventory"] as const) {
       expect(merchantContracts[key].path(input)).toBe(expectedPath);
       expect(merchantContracts[key].evidence.source).toContain(
-        "6614690a3b24b39f45c7c1b9ed85c20ecb22cbbf",
+        "7cd52e549c2a657dc66643b36701356d1d024de5",
       );
     }
     expect(merchantContracts.variantInventory).not.toHaveProperty("body");

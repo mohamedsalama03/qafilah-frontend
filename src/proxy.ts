@@ -14,7 +14,7 @@ export function proxy(request: NextRequest) {
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${development ? " 'unsafe-eval'" : ""}`,
     // Radix positions overlays with inline style attributes. Script execution remains nonce-only.
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
+    `img-src 'self' data:${apiOrigin ? ` ${apiOrigin}/storage/catalog/` : ""}`,
     "font-src 'self'",
     `connect-src 'self'${apiOrigin ? ` ${apiOrigin}` : ""}${development ? " ws://127.0.0.1:* ws://localhost:*" : ""}`,
     "object-src 'none'",

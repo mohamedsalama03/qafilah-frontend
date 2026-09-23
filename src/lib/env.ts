@@ -18,6 +18,7 @@ export function validateApiOrigin(value: string, mode: string = "production"): s
     url.protocol === "https:" || (mode !== "production" && local && url.protocol === "http:");
   if (
     !allowedProtocol ||
+    url.hostname.includes("*") ||
     url.username ||
     url.password ||
     url.pathname !== "/" ||

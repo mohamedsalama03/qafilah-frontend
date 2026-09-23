@@ -12,6 +12,10 @@ describe("public environment", () => {
   });
   it.each([
     "http://api.example.test",
+    "https://*.example.test",
+    "https://%2A.example.test",
+    "https://api.*.example.test",
+    "https://api.%2a.example.test",
     "http://localhost:8000",
     "https://user:secret@api.example.test",
     "https://api.example.test/api",

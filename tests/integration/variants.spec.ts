@@ -87,7 +87,10 @@ test.afterEach(async ({ page }, info) => {
       .some(
         (r) =>
           r.bearer ||
-          /\/(pricing|media)(\/|$)/.test(r.path) ||
+          (/\/(pricing|media)(\/|$)/.test(r.path) &&
+            !(
+              r.method === "GET" && /\/products\/[^/]+(?:\/variants\/[^/]+)?\/media$/.test(r.path)
+            )) ||
           (/\/inventory(\/|$)/.test(r.path) &&
             !(r.method === "GET" && /\/products\/[^/]+\/variants\/[^/]+\/inventory$/.test(r.path))),
       ),

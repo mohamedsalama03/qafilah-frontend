@@ -18,6 +18,10 @@ export interface EndpointContract<Input, Output> {
   path: (input: Input) => string;
   decode: (payload: unknown) => Output;
   body?: (input: Input) => unknown;
+  /** Explicit reviewed multipart boundary: browser generates Content-Type and boundary. */
+  multipartBody?: (input: Input) => FormData;
+  /** Exact successful HTTP status when mandated by the published contract. */
+  successStatus?: number;
   decodeError?: (payload: unknown, status: number) => SafeErrorDetails;
 }
 
