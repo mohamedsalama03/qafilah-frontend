@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import ts from "typescript";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const baseline = "1604c28f1f04d8d1f0c26bd14ba16cb0a1468132";
@@ -55,6 +56,76 @@ function replaceOnce(source, target, replacement) {
   return source.replace(target, replacement);
 }
 
+function mutateInventoryPendingFailure(source, path) {
+  const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  if (file.parseDiagnostics.length) throw new Error("Cannot parse Inventory feedback target");
+  // Bind JSX to the actual import, including aliases; a shadowed local component is not a target.
+  const options = { noLib: true, noResolve: true };
+  const isTargetFile = (name) => resolve(name) === resolve(path);
+  const host = {
+    ...ts.createCompilerHost(options),
+    getSourceFile: (name) => (isTargetFile(name) ? file : undefined),
+    fileExists: isTargetFile,
+    readFile: (name) => (isTargetFile(name) ? source : undefined),
+  };
+  const checker = ts.createProgram([path], options, host).getTypeChecker();
+  const bindings = file.statements
+    .filter(
+      (node) =>
+        ts.isImportDeclaration(node) &&
+        ts.isStringLiteral(node.moduleSpecifier) &&
+        node.moduleSpecifier.text === "@/features/inventory/components/product-inventory-panel" &&
+        !node.importClause?.isTypeOnly &&
+        node.importClause?.namedBindings &&
+        ts.isNamedImports(node.importClause.namedBindings),
+    )
+    .flatMap((node) => node.importClause.namedBindings.elements)
+    .filter(
+      (node) =>
+        !node.isTypeOnly && (node.propertyName ?? node.name).text === "ProductInventoryPanel",
+    );
+  if (bindings.length !== 1) throw new Error("Expected one ProductInventoryPanel value import");
+  const binding = checker.getSymbolAtLocation(bindings[0].name);
+  if (!binding) throw new Error("Cannot resolve ProductInventoryPanel import");
+  const panels = [];
+  function visit(node) {
+    if (
+      (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) &&
+      ts.isIdentifier(node.tagName) &&
+      checker.getSymbolAtLocation(node.tagName) === binding
+    )
+      panels.push(node);
+    ts.forEachChild(node, visit);
+  }
+  visit(file);
+  if (panels.length !== 1)
+    throw new Error("Expected one imported ProductInventoryPanel invocation");
+  const attributes = panels[0].attributes.properties;
+  if (attributes.some(ts.isJsxSpreadAttribute))
+    throw new Error("Inventory feedback target must have explicit props without spreads");
+  function expression(name) {
+    const matches = attributes.filter(
+      (node) => ts.isJsxAttribute(node) && ts.isIdentifier(node.name) && node.name.text === name,
+    );
+    const initializer = matches[0]?.initializer;
+    if (
+      matches.length !== 1 ||
+      !initializer ||
+      !ts.isJsxExpression(initializer) ||
+      !initializer.expression
+    )
+      throw new Error(`Expected one Inventory ${name} expression`);
+    return initializer.expression;
+  }
+  const failed = expression("productReadFailed");
+  const pending = expression("productReadPending");
+  return (
+    source.slice(0, failed.getStart(file)) +
+    `(${failed.getText(file)}) || (${pending.getText(file)})` +
+    source.slice(failed.end)
+  );
+}
+
 /** Apply operative changes before Vite compiles a module; never rewrite source files. */
 export function transformInventoryFeedbackSource(source, path, name) {
   if (!inventoryFeedbackVariants[name])
@@ -65,11 +136,7 @@ export function transformInventoryFeedbackSource(source, path, name) {
   if (name === "string-decoy")
     return `${source}\nvoid "isFetching means refresh failure; ignore quantity focus priority (string only)";\n`;
   if (path === inventoryFeedbackSources[1] && name === "pending-refresh-failure")
-    return replaceOnce(
-      source,
-      "productReadFailed={!!query.error}",
-      "productReadFailed={!!query.error || query.isFetching}",
-    );
+    return mutateInventoryPendingFailure(source, path);
   if (path === inventoryFeedbackSources[0] && name === "quantity-focus-steal")
     return replaceOnce(source, "if (quantityError && canEdit) return;", "");
   return source;
