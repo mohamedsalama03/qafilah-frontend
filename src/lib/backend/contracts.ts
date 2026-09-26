@@ -122,6 +122,12 @@ const user = z.strictObject({
 });
 
 const accessibleStore = z.strictObject({ id: uuid, name: text(120), status: z.literal("active") });
+// Optional only during rollout: 7cd52e54 omits currency; 4c86b842 supplies it.
+// Discovery retains its exact three-field contract. This field grants no authority.
+const selectedContextStore = z.strictObject({
+  ...accessibleStore.shape,
+  currency: z.enum(["LYD", "USD", "EUR"]).nullable().optional(),
+});
 const pagination = z
   .strictObject({
     current_page: z.number().int().positive().safe(),
@@ -151,7 +157,7 @@ const permission = z
   .max(120)
   .regex(/^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$/);
 const storeContext = z.strictObject({
-  store: accessibleStore,
+  store: selectedContextStore,
   membership: z.strictObject({ id: uuid, status: z.literal("active") }),
   role: z.strictObject({ id: uuid, name: text(80) }),
   permissions: z
