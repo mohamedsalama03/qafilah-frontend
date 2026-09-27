@@ -25,7 +25,7 @@ export default defineConfig({
           "pristineProductionSources" +
           source.slice(identifier.end);
         return {
-          code: `import { mutateProduct, productFile } from "./store-currency-mutations.mjs";\n${original}\nexport function productionSources() { return pristineProductionSources().map(entry => ({...entry, source: entry.file === productFile ? mutateProduct(entry.source, ${JSON.stringify(name)}) : entry.source})); }`,
+          code: `import { mutateSources } from "./store-currency-mutations.mjs";\n${original}\nexport function productionSources() { return mutateSources(pristineProductionSources(), ${JSON.stringify(name)}); }`,
           map: null,
         };
       },

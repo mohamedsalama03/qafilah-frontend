@@ -4,6 +4,11 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
+import {
+  controllerCases,
+  controllerFile,
+  mutateController,
+} from "./currency-provenance-fixtures.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const productFile = "src/features/products/components/product-screen.tsx";
@@ -47,6 +52,31 @@ export const variants = {
       'const currency = state.context?.store.currency; const allowed = ["LYD", "USD", "EUR"] as const; const valid = currency != null && allowed.includes(currency);',
     jsx: "<span data-valid={valid}>{currency}</span>",
   },
+  ...Object.fromEntries(
+    Object.entries(controllerCases).map(([name, variant]) => [
+      name,
+      {
+        ...variant,
+        killedBy: "keeps repository-wide production currency authority",
+      },
+    ]),
+  ),
+  "unrelated-unresolved": {
+    statement: "const shown = unknownProducer().whatever;",
+    jsx: "<span>{shown}</span>",
+  },
+  "product-unresolved-currency": {
+    statement: "const currency = unknownProducer().currency;",
+    reason: "unresolved-currency-provenance",
+    killedBy: "keeps production free of unresolved currency provenance",
+  },
+  "product-unresolved-jsx": {
+    prefix: moneyComponent,
+    statement: "const code = unknownProducer();",
+    jsx: "<Money currency={code} />",
+    reason: "unresolved-currency-provenance",
+    killedBy: "keeps production free of unresolved currency provenance",
+  },
   "product-lyd-fallback": {
     statement: 'const currency = state.context?.store.currency ?? "LYD";',
     reason: "currency-fallback",
@@ -80,6 +110,20 @@ export const variants = {
     reason: "retained-currency-snapshot",
     killedBy: "keeps production free of R4 retained snapshot",
   },
+  "r4-react-ref": {
+    prefix: 'import {useRef as hold} from "react";\n',
+    statement: "const box = hold(state.context?.store); const shown = box.current?.currency;",
+    jsx: "<span>{shown}</span>",
+    reason: "retained-currency-snapshot",
+    killedBy: "keeps production free of R4 retained snapshot",
+  },
+  "r4-react-state": {
+    prefix: 'import {useState as hold} from "react";\n',
+    statement: "const [box] = hold(state.context?.store); const shown = box?.currency;",
+    jsx: "<span>{shown}</span>",
+    reason: "retained-currency-snapshot",
+    killedBy: "keeps production free of R4 retained snapshot",
+  },
   "r7-jsx-literal": {
     prefix: moneyComponent,
     statement: "const currency = state.context?.store.currency;",
@@ -94,9 +138,22 @@ export const variants = {
     reason: "literal-currency-argument",
     killedBy: "keeps production free of R8 formatter currency",
   },
+  "r8-imported-arrow-literal": {
+    prefix: 'import {formatAmount as showAmount} from "@/lib/formatting/money";\n',
+    statement: 'const shown = showAmount(1000, "LYD");',
+    jsx: "<span>{shown}</span>",
+    reason: "literal-currency-argument",
+    killedBy: "keeps production free of R8 formatter currency",
+  },
+  "authoritative-imported-arrow": {
+    prefix: 'import {formatAmount as showAmount} from "@/lib/formatting/money";\n',
+    statement:
+      "const currency = state.context?.store.currency; const shown = currency == null ? null : showAmount(1000, currency);",
+    jsx: "<span>{shown}</span>",
+  },
   "r9-ternary-array-fallback": {
     statement:
-      'const currency = state.context?.store.currency; const shown = currency != null ? currency : (["LYD", "USD", "EUR"] as const)[0];',
+      'const currency = state.context?.store.currency; const shown = currency != null ? currency : (["LYD", "USD", "EUR"] as const).at(0);',
     jsx: "<span>{shown}</span>",
     reason: "currency-fallback",
     killedBy: "keeps production free of R9 equivalent fallback",
@@ -127,6 +184,22 @@ export const variants = {
   },
   "pristine-after": {},
 };
+
+export function mutateSources(entries, name) {
+  return entries.map((entry) => ({
+    ...entry,
+    source:
+      entry.file === controllerFile && name in controllerCases
+        ? mutateController(entry.source, name)
+        : entry.file === "src/lib/formatting/money.ts" &&
+            ["r8-imported-arrow-literal", "authoritative-imported-arrow"].includes(name)
+          ? entry.source +
+            '\nexport const formatAmount = (amount: number, currency: string) => formatMoney(String(amount), {currency, locale: "en"});\n'
+          : entry.file === productFile
+            ? mutateProduct(entry.source, name)
+            : entry.source,
+  }));
+}
 
 /** Structural ProductDetail injection: the new value is rendered, not an unused fixture.
  * Only the source reader's in-memory result changes. No production/test files are rewritten.
@@ -206,6 +279,7 @@ function snapshot() {
     ...new Set([
       ...git.stdout.trim().split(/\r?\n/),
       "tests/currency-authority-policy.ts",
+      "tests/currency-provenance-fixtures.ts",
       "tests/production-sources.ts",
       "tests/store-currency-mutations.mjs",
       "tests/store-currency-mutations.config.mjs",
@@ -303,7 +377,15 @@ export function runCurrencyMutations() {
             /keeps repository-wide|keeps production persistence/.test(assertion.fullName),
           )
           .map((assertion) => ({ name: assertion.fullName, durationMs: assertion.duration })),
-        transformedSha256: hash(mutateProduct(readFileSync(join(root, productFile), "utf8"), name)),
+        transformedSha256: Object.fromEntries(
+          mutateSources(
+            [productFile, controllerFile, "src/lib/formatting/money.ts"].map((file) => ({
+              file,
+              source: readFileSync(join(root, file), "utf8"),
+            })),
+            name,
+          ).map(({ file, source }) => [file, hash(source)]),
+        ),
       });
       process.stdout.write(`${name}: ${actual} (${failures.length}/${executed} failed)\n`);
       if (actual !== expected)
@@ -316,7 +398,8 @@ export function runCurrencyMutations() {
       join(directory, "results.json"),
       JSON.stringify(
         {
-          execution: "Permanent production scan with in-memory ProductDetail source injection",
+          execution:
+            "Permanent production scan with in-memory real controller, ProductDetail and imported helper injection",
           before,
           after,
           residue: unchanged ? "NONE" : "PRESENT",

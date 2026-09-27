@@ -1,9 +1,11 @@
 // @vitest-environment node
 import ts from "typescript";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { inspectArchitecture } from "./architecture-policy";
 import { inspectCurrencyAuthority } from "./currency-authority-policy";
 import { productionAnalysis } from "./production-sources";
+import { controllerCases, controllerFile, mutateController } from "./currency-provenance-fixtures";
 
 function optionalCurrency(node: ts.Node): boolean {
   function unwrap(value: ts.Node, method: string): ts.Expression | undefined {
@@ -70,6 +72,76 @@ const finalGaps = [
 ] as const;
 
 describe("Store currency compatibility architecture", () => {
+  it("reproduces the exact historical 08ecfa90 controller edit without changing declarations", () => {
+    const source = readFileSync(controllerFile, "utf8");
+    const original = "const verified = freezeContext(context);";
+    const replacement =
+      "const verified = freezeContext(context.store.currency === undefined && previous ? { ...context, store: { ...context.store, currency: previous.store.currency } } : context);";
+    expect(source.split(original)).toHaveLength(2);
+    expect(mutateController(source, "F2-controller-previous-store-inference")).toBe(
+      source.replace(original, replacement),
+    );
+  });
+  it.each(Object.entries(controllerCases))("checks real source provenance: %s", (name, variant) => {
+    const source = readFileSync(controllerFile, "utf8");
+    const transformed = mutateController(source, name as keyof typeof controllerCases);
+    expect(transformed).toContain("const context = await options.scope.run(");
+    expect(transformed).toContain("const previous = preserve ? state.context : null;");
+    const result = inspectCurrencyAuthority(controllerFile, transformed);
+    if ("reason" in variant) expect(result.map(({ reason }) => reason)).toContain(variant.reason);
+    else expect(result).toEqual([]);
+  });
+  it.each([
+    "const currency = unknownProducer().currency;",
+    "const currency = unknownProducer().store.currency;",
+    "const code = unknownProducer(); const node = <Money currency={code} />;",
+    "const code = unknownProducer(); function format(amount, currency) {return String(amount);} format(1, code);",
+    "const currency = context.store.currency ?? unknownProducer();",
+  ])("fails closed at unresolved currency use: %s", (source) => {
+    expect(inspect(source).map(({ reason }) => reason)).toContain("unresolved-currency-provenance");
+  });
+  it.each([
+    "const thing = unknownProducer(); render(thing);",
+    "const unrelated = unknownProducer().whatever; const view = <div>{unrelated}</div>;",
+    'const matches = old.currency === context.store.currency; const valid = ["LYD", "USD", "EUR"].includes(old.currency);',
+    'const code = context.store.currency; switch(code) {case "LYD": reportMatch(); break;}',
+    "const currency = null; const view = <Money currency={currency} />;",
+  ])("allows unrelated unknowns and harmless inspection: %s", (source) => {
+    expect(inspect(source)).toEqual([]);
+  });
+  it.each(["previous", "a", "held"])(
+    "rejects retained React snapshot independent of name: %s",
+    (name) => {
+      for (const declaration of [
+        `const ${name} = useRef(context.store); const shown = ${name}.current.currency;`,
+        `const [${name}] = useState(context.store); const shown = ${name}.currency;`,
+      ])
+        expect(
+          inspect(`function Detail(context) { ${declaration} return <span>{shown}</span>; }`).map(
+            ({ reason }) => reason,
+          ),
+        ).toContain("retained-currency-snapshot");
+    },
+  );
+  it("checks imported arrow helper currency inputs rather than trusting unknown calls", () => {
+    const file = "src/lib/formatting/example.ts";
+    const helper =
+      "export const formatAmount = (amount: number, currency: string) => String(amount) + currency;";
+    for (const [argument, expected] of [
+      ['"LYD"', "literal-currency-argument"],
+      ["unknownProducer()", "unresolved-currency-provenance"],
+      ["context.store.currency", null],
+    ] as const) {
+      const source = `import {formatAmount as display} from "@/lib/formatting/example"; display(1000, ${argument});`;
+      const result = inspectCurrencyAuthority(
+        product,
+        source,
+        new Map([[file, ts.createSourceFile(file, helper, ts.ScriptTarget.Latest, true)]]),
+      );
+      if (expected) expect(result.map(({ reason }) => reason)).toContain(expected);
+      else expect(result).toEqual([]);
+    }
+  });
   it.each(finalGaps)("closes permanent static gap %s", (_name, source, reason) => {
     expect(
       inspect(source).map((violation) => violation.reason),
@@ -87,7 +159,7 @@ describe("Store currency compatibility architecture", () => {
       expect(inspect(retained).map(({ reason }) => reason)).toContain("retained-currency-snapshot");
     },
   );
-  it("preserves the original previous-Store fallback coverage", () => {
+  it("preserves nullish previous-Store fallback coverage", () => {
     const source =
       "const old = previousStore; const currency = state.context?.store.currency ?? old.currency;";
     expect(inspect(source).map(({ reason }) => reason)).toContain("currency-fallback");
@@ -124,6 +196,7 @@ describe("Store currency compatibility architecture", () => {
     ["R7 JSX currency", "literal-currency-jsx"],
     ["R8 formatter currency", "literal-currency-argument"],
     ["R9 equivalent fallback", "currency-fallback"],
+    ["unresolved currency provenance", "unresolved-currency-provenance"],
   ])("keeps production free of %s", (_name, reason) => {
     const violations = productionAnalysis().currency.filter(
       (violation) => violation.reason === reason,
@@ -207,7 +280,7 @@ describe("Store currency compatibility architecture", () => {
     [
       "locale alias",
       "const selected = navigator.language; const currency = selected;",
-      "synthesized-currency",
+      "unresolved-currency-provenance",
     ],
     [
       "locale map consumed by a call",
@@ -222,12 +295,12 @@ describe("Store currency compatibility architecture", () => {
     [
       "previous Store alias",
       "const old = previousStore; const currency = old.currency;",
-      "previous-store-currency",
+      "unresolved-currency-provenance",
     ],
     [
       "previous Store destructuring",
       "const { currency: code } = previousStore; render(code);",
-      "previous-store-currency",
+      "unresolved-currency-provenance",
     ],
     [
       "previous Store fallback",
@@ -260,11 +333,15 @@ describe("Store currency compatibility architecture", () => {
       'const key = "currency"; const result = context.store[key] ?? "LYD";',
       "currency-fallback",
     ],
-    ["unknown producer", "const currency = inferFromSomewhere();", "synthesized-currency"],
+    [
+      "unknown producer",
+      "const currency = inferFromSomewhere();",
+      "unresolved-currency-provenance",
+    ],
     [
       "schema default",
       'const schema = z.strictObject({currency: z.enum(["LYD","USD","EUR"]).default("LYD")});',
-      "synthesized-currency",
+      "unresolved-currency-provenance",
     ],
   ])("rejects operative %s in Product and future production features", (_label, source, reason) => {
     for (const file of [
