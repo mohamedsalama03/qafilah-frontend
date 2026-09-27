@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
@@ -11,6 +11,10 @@ export const testPaths = [
   "tests/store-currency-architecture.test.ts",
   "src/lib/backend/store-currency.test.ts",
 ];
+const moneyComponent =
+  'function Money({currency}: {currency?: "LYD" | "USD" | "EUR" | null}) { return <span>{currency}</span>; }\n';
+const formatterImport =
+  'import { minorUnitsToDecimal as renderAmount } from "@/features/products/model";\n';
 export const variants = {
   pristine: {},
   "comment-decoy": {
@@ -20,7 +24,28 @@ export const variants = {
   "string-decoy": {},
   "authoritative-read": { statement: "const currency = state.context?.store.currency;" },
   "authoritative-alias": {
-    statement: "const selected = state.context?.store; const currency = selected?.currency;",
+    statement:
+      "const previousStore = state.context?.store; const currency = previousStore?.currency;",
+  },
+  "authoritative-computed-destructured": {
+    statement:
+      'const {currency: code} = state.context?.["store"] ?? {}; const currency = code ?? null;',
+  },
+  "authoritative-jsx": {
+    prefix: moneyComponent,
+    statement: "const currency = state.context?.store.currency;",
+    jsx: "<Money currency={currency} />",
+  },
+  "authoritative-formatter": {
+    prefix: formatterImport,
+    statement:
+      'const currency = state.context?.store.currency; const shown = currency == null ? "Not configured" : renderAmount(1000, currency);',
+    jsx: "<span>{shown}</span>",
+  },
+  "validation-decoy": {
+    statement:
+      'const currency = state.context?.store.currency; const allowed = ["LYD", "USD", "EUR"] as const; const valid = currency != null && allowed.includes(currency);',
+    jsx: "<span data-valid={valid}>{currency}</span>",
   },
   "product-lyd-fallback": {
     statement: 'const currency = state.context?.store.currency ?? "LYD";',
@@ -39,6 +64,42 @@ export const variants = {
     statement:
       "const currency = state.context?.store.currency ?? previousStore?.currency; previousStore = state.context?.store;",
     reason: "currency-fallback",
+  },
+  "r3-ordinary-identifier-reuse": {
+    prefix: 'let other: {store: {currency?: "LYD" | "USD" | "EUR" | null}} | undefined;\n',
+    statement:
+      "const context = state.context; const currency = context?.store.currency; const projection = currency === undefined && other && context ? {...context, store:{...context.store, currency:other.store.currency}} : context; other = context ?? undefined;",
+    jsx: "<span>{projection?.store.currency}</span>",
+    reason: "currency-source-substitution",
+    killedBy: "keeps production free of R3 source substitution",
+  },
+  "r4-retained-snapshot": {
+    prefix: 'let box: {currency?: "LYD" | "USD" | "EUR" | null} | undefined;\n',
+    statement: "const shown = box?.currency; box = state.context?.store;",
+    jsx: "<span>{shown}</span>",
+    reason: "retained-currency-snapshot",
+    killedBy: "keeps production free of R4 retained snapshot",
+  },
+  "r7-jsx-literal": {
+    prefix: moneyComponent,
+    statement: "const currency = state.context?.store.currency;",
+    jsx: '<Money currency="LYD" />',
+    reason: "literal-currency-jsx",
+    killedBy: "keeps production free of R7 JSX currency",
+  },
+  "r8-formatter-literal": {
+    prefix: formatterImport,
+    statement: 'const shown = renderAmount(1000, "LYD");',
+    jsx: "<span>{shown}</span>",
+    reason: "literal-currency-argument",
+    killedBy: "keeps production free of R8 formatter currency",
+  },
+  "r9-ternary-array-fallback": {
+    statement:
+      'const currency = state.context?.store.currency; const shown = currency != null ? currency : (["LYD", "USD", "EUR"] as const)[0];',
+    jsx: "<span>{shown}</span>",
+    reason: "currency-fallback",
+    killedBy: "keeps production free of R9 equivalent fallback",
   },
   "product-independent-synthesis": {
     statement: 'const currency = "USD";',
@@ -99,22 +160,29 @@ export function mutateProduct(source, name) {
   // Apply later offset first. The declaration is consumed by the actual JSX render.
   const output =
     source.slice(0, jsx.openingFragment.end) +
-    "\n<span>{currency}</span>\n" +
+    `\n${variant.jsx ?? "<span>{currency}</span>"}\n` +
     source.slice(jsx.openingFragment.end);
   const result =
     output.slice(0, returns[0].getStart(tree)) +
     variant.statement +
     "\n" +
     output.slice(returns[0].getStart(tree));
+  // Preserve the client directive when adding imports or retained-state declarations.
+  const directive = tree.statements[0];
+  const at =
+    directive && ts.isExpressionStatement(directive) && ts.isStringLiteral(directive.expression)
+      ? directive.end
+      : 0;
+  const complete = result.slice(0, at) + "\n" + (variant.prefix ?? "") + result.slice(at);
   const parsed = ts.createSourceFile(
     productFile,
-    result,
+    complete,
     ts.ScriptTarget.Latest,
     true,
     ts.ScriptKind.TSX,
   );
   if (parsed.parseDiagnostics.length) throw new Error("Mutation must remain valid TSX");
-  return (variant.prefix ?? "") + result;
+  return complete;
 }
 
 const hash = (data) => createHash("sha256").update(data).digest("hex");
@@ -147,7 +215,11 @@ function snapshot() {
 }
 
 export function runCurrencyMutations() {
-  const directory = join(root, "artifacts/f3g-l1/currency-mutations");
+  const directory = join(
+    root,
+    process.env.QAFILAH_MUTATION_ARTIFACT_ROOT ?? "artifacts/f3g-l1-final",
+    "currency-mutations",
+  );
   mkdirSync(directory, { recursive: true });
   const before = snapshot();
   const records = [];
@@ -155,6 +227,8 @@ export function runCurrencyMutations() {
   try {
     for (const [name, variant] of Object.entries(variants)) {
       const reportPath = join(directory, `${name}.json`);
+      // An infrastructure failure must never reuse a RED report from an earlier run.
+      rmSync(reportPath, { force: true });
       const run = spawnSync(
         process.execPath,
         [
@@ -191,12 +265,13 @@ export function runCurrencyMutations() {
         assertions.length === count &&
         assertions.every((assertion) => ["passed", "failed"].includes(assertion.status)) &&
         !report.numPendingTests &&
-        !report.numTodoTests;
-      const expectedAssertion = ["browser-persistence", "central-api-boundary"].includes(
-        variant.reason,
-      )
-        ? "keeps production persistence and Pricing activation blocked"
-        : "keeps repository-wide production currency authority";
+        !report.numTodoTests &&
+        !report.numRuntimeErrorTestSuites;
+      const expectedAssertion =
+        variant.killedBy ??
+        (["browser-persistence", "central-api-boundary"].includes(variant.reason)
+          ? "keeps production persistence and Pricing activation blocked"
+          : "keeps repository-wide production currency authority");
       const intended = failures.some(
         (assertion) =>
           assertion.fullName.includes(expectedAssertion) &&
@@ -223,6 +298,11 @@ export function runCurrencyMutations() {
         executed,
         intended,
         failures,
+        scanTimings: assertions
+          .filter((assertion) =>
+            /keeps repository-wide|keeps production persistence/.test(assertion.fullName),
+          )
+          .map((assertion) => ({ name: assertion.fullName, durationMs: assertion.duration })),
         transformedSha256: hash(mutateProduct(readFileSync(join(root, productFile), "utf8"), name)),
       });
       process.stdout.write(`${name}: ${actual} (${failures.length}/${executed} failed)\n`);

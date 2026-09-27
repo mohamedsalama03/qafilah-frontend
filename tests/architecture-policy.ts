@@ -73,15 +73,16 @@ function unwrap(expression: ts.Expression): ts.Expression {
 }
 
 /** A deliberately bounded source policy, not a general-purpose JavaScript taint analyzer. */
-export function inspectArchitecture(filename: string, source: string): ArchitectureViolation[] {
+export function inspectArchitecture(
+  filename: string,
+  source: string,
+  parsed?: ts.SourceFile,
+): ArchitectureViolation[] {
   if (!isProductionSource(filename)) return [];
-  const file = ts.createSourceFile(
-    filename,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TSX,
-  );
+  const file =
+    parsed?.fileName === filename && parsed.text === source
+      ? parsed
+      : ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   type Binding = ts.Expression | ts.FunctionDeclaration | null;
   const bindings = new Map<ts.Node, Map<string, Binding>>();
   const destructured = new Map<string, string>();

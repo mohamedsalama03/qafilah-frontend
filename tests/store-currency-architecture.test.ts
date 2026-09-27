@@ -3,7 +3,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { inspectArchitecture } from "./architecture-policy";
 import { inspectCurrencyAuthority } from "./currency-authority-policy";
-import { productionSources } from "./production-sources";
+import { productionAnalysis } from "./production-sources";
 
 function optionalCurrency(node: ts.Node): boolean {
   function unwrap(value: ts.Node, method: string): ts.Expression | undefined {
@@ -40,34 +40,102 @@ function optionalCurrency(node: ts.Node): boolean {
 const product = "src/features/products/components/product-screen.tsx";
 const inspect = (source: string) => inspectCurrencyAuthority(product, source);
 
+const finalGaps = [
+  [
+    "R3 ordinary identifier substitution",
+    `function reuse(context, other) { const currency = context.store.currency; return currency === undefined && other ? {...context, store: {...context.store, currency: other.store.currency}} : context; }`,
+    "currency-source-substitution",
+  ],
+  [
+    "R4 module snapshot",
+    `let box; function detail(state) { const shown = box?.currency; box = state.context?.store; return shown; }`,
+    "retained-currency-snapshot",
+  ],
+  [
+    "R4 local snapshot read before update",
+    `function detail(state) { let box; const shown = box?.currency; box = state.context?.store; return shown; }`,
+    "retained-currency-snapshot",
+  ],
+  ["R7 JSX literal", 'const view = <Money currency="LYD" />;', "literal-currency-jsx"],
+  [
+    "R8 formatter literal",
+    'function minorUnitsToDecimal(amount, currency) { return String(amount) + currency; } minorUnitsToDecimal(1000, "LYD");',
+    "literal-currency-argument",
+  ],
+  [
+    "R9 ternary array fallback",
+    'const currency = context.store.currency; const shown = currency != null ? currency : (["LYD","USD","EUR"] as const)[0];',
+    "currency-fallback",
+  ],
+] as const;
+
 describe("Store currency compatibility architecture", () => {
+  it.each(finalGaps)("closes permanent static gap %s", (_name, source, reason) => {
+    expect(
+      inspect(source).map((violation) => violation.reason),
+      source,
+    ).toContain(reason);
+  });
+  it.each(["previous", "record", "a"])(
+    "tracks source substitution and retained snapshots with identifier %s",
+    (name) => {
+      const substitution = `function display(context, ${name}) { const {currency: code} = context.store; return code === undefined && ${name} ? {...context, store:{...context.store, currency:${name}.store.currency}} : context; }`;
+      expect(inspect(substitution).map(({ reason }) => reason)).toContain(
+        "currency-source-substitution",
+      );
+      const retained = `let ${name}; function detail(state) { const copy = ${name}; const shown = copy?.currency; ${name} = state.context?.store; return shown; }`;
+      expect(inspect(retained).map(({ reason }) => reason)).toContain("retained-currency-snapshot");
+    },
+  );
+  it("preserves the original previous-Store fallback coverage", () => {
+    const source =
+      "const old = previousStore; const currency = state.context?.store.currency ?? old.currency;";
+    expect(inspect(source).map(({ reason }) => reason)).toContain("currency-fallback");
+  });
   it("keeps repository-wide production currency authority", () => {
-    const sources = productionSources();
+    const { sources, currency: violations } = productionAnalysis();
     expect(sources.some(({ file }) => file === product)).toBe(true);
     expect(sources.some(({ file }) => file.startsWith("src/features/variants/"))).toBe(true);
     expect(sources.every(({ file }) => !/\.(test|spec)\./.test(file))).toBe(true);
-    const violations = sources.flatMap(({ file, source }) =>
-      inspectCurrencyAuthority(file, source),
-    );
     expect(violations, JSON.stringify(violations)).toEqual([]);
   });
 
   it("keeps production persistence and Pricing activation blocked", () => {
-    const violations = productionSources().flatMap(({ file, source }) =>
-      inspectArchitecture(file, source).filter(({ rule }) =>
-        ["browser-persistence", "central-api-boundary", "verified-contract-registry"].includes(
-          rule,
-        ),
-      ),
+    const violations = productionAnalysis().architecture.filter(({ rule }) =>
+      ["browser-persistence", "central-api-boundary", "verified-contract-registry"].includes(rule),
+    );
+    expect(violations, JSON.stringify(violations)).toEqual([]);
+  });
+
+  it("reuses one parsed production inventory and one analysis per rule", () => {
+    const first = productionAnalysis();
+    const second = productionAnalysis();
+    expect(first).toBe(second);
+    expect(first.currency).toBe(second.currency);
+    expect(first.architecture).toBe(second.architecture);
+    expect(first.parsedFiles).toBe(first.sources.length);
+    expect(first.timing.currencyScans).toBe(1);
+    expect(first.timing.architectureScans).toBe(1);
+  });
+
+  it.each([
+    ["R3 source substitution", "currency-source-substitution"],
+    ["R4 retained snapshot", "retained-currency-snapshot"],
+    ["R7 JSX currency", "literal-currency-jsx"],
+    ["R8 formatter currency", "literal-currency-argument"],
+    ["R9 equivalent fallback", "currency-fallback"],
+  ])("keeps production free of %s", (_name, reason) => {
+    const violations = productionAnalysis().currency.filter(
+      (violation) => violation.reason === reason,
     );
     expect(violations, JSON.stringify(violations)).toEqual([]);
   });
 
   it("owns optional typed currency only in strict selected context, never discovery", () => {
-    const registry = productionSources().find(
+    const registry = productionAnalysis().sources.find(
       ({ file }) => file === "src/lib/backend/contracts.ts",
     )!;
-    const tree = ts.createSourceFile(registry.file, registry.source, ts.ScriptTarget.Latest, true);
+    const tree = productionAnalysis().trees.get(registry.file)!;
     const shapes = new Map<string, ts.ObjectLiteralExpression>();
     function visit(node: ts.Node) {
       if (
@@ -217,9 +285,17 @@ describe("Store currency compatibility architecture", () => {
     'function verb() { return "GET"; } const note = "USD is a currency code";',
     "const currency = state.context?.store.currency;",
     "const store = context.store; const currency = store.currency;",
+    "const previousStore = context.store; const previousCurrency = previousStore.currency; const currency = previousCurrency;",
     "const { currency: code } = context.store; render(code);",
     'const code = context.store["currency"]; render(code);',
     "const currency = context.store.currency ?? null;",
+    "const currency = context.store.currency; const node = <Money currency={currency} />;",
+    "function minorUnitsToDecimal(amount, currency) { return String(amount); } const code = context.store.currency; if (code) minorUnitsToDecimal(1000, code);",
+    "const {currency: code} = context.store; const chosen = code != null ? code : null; const node = <Money currency={chosen} />;",
+    'const allowed = ["LYD", "USD", "EUR"] as const; const currency = context.store.currency; const valid = allowed.includes(currency); const isLyd = currency === "LYD";',
+    'function supported(currency): boolean { return ["LYD", "USD", "EUR"].includes(currency); } supported("LYD");',
+    'const labels = ["LYD", "USD", "EUR"]; const prose = "LYD"; const node = <span title="LYD">LYD</span>; recordMessage("LYD");',
+    "let box; function detail(context) { const box = context.store; return box.currency; } function refresh(state) { box = state.context.store; }",
     "function read(context) { return context.store.currency; } const currency = read(context);",
     "const currency = context.store.currency; function render(currency) { return currency; }",
     'const currency = context.store.currency; new Intl.NumberFormat(locale, {style:"currency", currency});',
