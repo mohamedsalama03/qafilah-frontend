@@ -291,7 +291,8 @@ export function createStoreController(options: StoreControllerOptions) {
         // Revoke cached data and in-flight reads before publishing changed capabilities.
         const authorityChanged =
           previous &&
-          (previous.membership.id !== verified.membership.id ||
+          (previous.store.currency !== verified.store.currency ||
+            previous.membership.id !== verified.membership.id ||
             previous.role.id !== verified.role.id ||
             [...previous.permissions].sort().join("\n") !==
               [...verified.permissions].sort().join("\n"));

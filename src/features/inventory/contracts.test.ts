@@ -30,7 +30,7 @@ function setup() {
 
 describe("published simple Product inventory contracts", () => {
   it("activates exactly the verified Product inventory GET and PATCH", () => {
-    expect(Object.keys(merchantContracts)).toHaveLength(35);
+    expect(Object.keys(merchantContracts)).toHaveLength(39);
     expect(merchantContracts.productInventory.method).toBe("GET");
     expect(merchantContracts.updateProductInventory.method).toBe("PATCH");
     for (const key of ["productInventory", "updateProductInventory"] as const) {

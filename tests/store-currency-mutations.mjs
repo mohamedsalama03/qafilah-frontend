@@ -344,7 +344,7 @@ export function runCurrencyMutations() {
       const expectedAssertion =
         variant.killedBy ??
         (["browser-persistence", "central-api-boundary"].includes(variant.reason)
-          ? "keeps production persistence and Pricing activation blocked"
+          ? "keeps production persistence and unverified Pricing activation blocked"
           : "keeps repository-wide production currency authority");
       const intended = failures.some(
         (assertion) =>

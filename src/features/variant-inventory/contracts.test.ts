@@ -32,7 +32,7 @@ function setup() {
 
 describe("published Variant inventory contracts", () => {
   it("registers only the two confirmed nested inventory contracts", () => {
-    expect(Object.keys(merchantContracts)).toHaveLength(35);
+    expect(Object.keys(merchantContracts)).toHaveLength(39);
     expect(Object.keys(merchantContracts).filter((key) => /variantinventory/i.test(key))).toEqual([
       "variantInventory",
       "updateVariantInventory",

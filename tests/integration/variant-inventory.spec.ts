@@ -103,7 +103,7 @@ test.afterEach(async ({ page }, info) => {
           /\/(pricing|media)\b/.test(entry.path) &&
           !(
             entry.method === "GET" &&
-            /\/products\/[^/]+(?:\/variants\/[^/]+)?\/media$/.test(entry.path)
+            /\/products\/[^/]+(?:\/variants\/[^/]+)?\/(?:media|pricing)$/.test(entry.path)
           ),
       ),
   ).toBe(false);

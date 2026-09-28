@@ -129,6 +129,10 @@ async function fixture(grants = permissions, target = product()) {
     createVariantMedia: vi.fn(),
     updateVariantMedia: vi.fn(),
     deleteVariantMedia: vi.fn(),
+    loadProductPricing: vi.fn(async () => ({ price: null })),
+    updateProductPricing: vi.fn(),
+    loadVariantPricing: vi.fn(async () => ({ price: null })),
+    updateVariantPricing: vi.fn(),
     loadVariantInventory: vi.fn(async () => inventory()),
     updateVariantInventory: vi.fn(async (input) => inventory(input.data.quantity)),
   };

@@ -1,6 +1,8 @@
+import { inspectPricingSafety } from "./pricing-policy";
 import ts from "typescript";
 
 export type ArchitectureRule =
+  | "pricing-safety"
   | "browser-persistence"
   | "central-api-boundary"
   | "token-authentication"
@@ -370,6 +372,16 @@ export function inspectArchitecture(
     publishProduct: ["POST", "/api/v1/stores/{value}/catalog/products/{value}/publish"],
     unpublishProduct: ["POST", "/api/v1/stores/{value}/catalog/products/{value}/unpublish"],
     archiveProduct: ["POST", "/api/v1/stores/{value}/catalog/products/{value}/archive"],
+    productPricing: ["GET", "/api/v1/stores/{value}/catalog/products/{value}/pricing"],
+    updateProductPricing: ["PATCH", "/api/v1/stores/{value}/catalog/products/{value}/pricing"],
+    variantPricing: [
+      "GET",
+      "/api/v1/stores/{value}/catalog/products/{value}/variants/{value}/pricing",
+    ],
+    updateVariantPricing: [
+      "PATCH",
+      "/api/v1/stores/{value}/catalog/products/{value}/variants/{value}/pricing",
+    ],
     productInventory: ["GET", "/api/v1/stores/{value}/catalog/products/{value}/inventory"],
     updateProductInventory: ["PATCH", "/api/v1/stores/{value}/catalog/products/{value}/inventory"],
     productOptions: ["GET", "/api/v1/stores/{value}/catalog/products/{value}/options"],
@@ -493,6 +505,13 @@ export function inspectArchitecture(
         expressionPath(properties.get("decode")!) !== "decodeVariantInventory")
     )
       report("variant-inventory-response-boundary", node);
+    if (
+      ["productPricing", "updateProductPricing", "variantPricing", "updateVariantPricing"].includes(
+        entry ?? "",
+      ) &&
+      (!properties.get("decode") || expressionPath(properties.get("decode")!) !== "decodePricing")
+    )
+      report("pricing-safety", node);
     const mediaDecoders: Record<string, readonly [string, number]> = {
       productMedia: ["decodeProductMediaList", 200],
       createProductMedia: ["decodeProductMedia", 201],
@@ -1212,7 +1231,8 @@ export function inspectArchitecture(
         !inventoryMutationSource &&
         !variantMutationSource &&
         !(variantInventoryMutationSource && target.endsWith(".loadProduct")) &&
-        !(mediaMutationSource && target.endsWith(".loadProduct"))
+        !(mediaMutationSource && target.endsWith(".loadProduct")) &&
+        !(path === "src/features/pricing/mutations.ts" && target.endsWith(".loadProduct"))
       )
         report("product-query-isolation", node);
       if (
@@ -1239,7 +1259,8 @@ export function inspectArchitecture(
         !variantQuerySource &&
         !variantMutationSource &&
         !(variantInventoryMutationSource && target.endsWith(".loadProductVariant")) &&
-        !(mediaMutationSource && target.endsWith(".loadProductVariant"))
+        !(mediaMutationSource && target.endsWith(".loadProductVariant")) &&
+        !(path === "src/features/pricing/mutations.ts" && target.endsWith(".loadProductVariant"))
       )
         report("variant-query-isolation", node);
       if (
@@ -1488,5 +1509,7 @@ export function inspectArchitecture(
     .forEach((node) => report("variant-inventory-mutation-retry", node));
   for (const calls of variantDispatches.values())
     calls.slice(1).forEach((node) => report("variant-mutation-retry", node));
+  for (const line of inspectPricingSafety(path, source))
+    violations.push({ rule: "pricing-safety", file: path, line, column: 1 });
   return violations;
 }

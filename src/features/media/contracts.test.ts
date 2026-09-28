@@ -62,7 +62,7 @@ const entries = [
 describe("eight published media contracts", () => {
   it("activates exactly the eight nested contract paths, methods and statuses", () => {
     expect(Object.keys(merchantContracts).filter((key) => /media/i.test(key))).toEqual(entries);
-    expect(Object.keys(merchantContracts)).toHaveLength(35);
+    expect(Object.keys(merchantContracts)).toHaveLength(39);
     entries.forEach((key, index) => {
       const contract = merchantContracts[key];
       const variant = index >= 4;

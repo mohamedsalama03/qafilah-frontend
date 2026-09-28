@@ -540,7 +540,7 @@ describe("permanent executable architecture boundaries", () => {
     );
   });
 
-  it("activates exactly published F2–F3-E and eight media contracts", () => {
+  it("activates exactly published F2–F3-G contracts", () => {
     const uuid = "15913d0d-10a1-40ed-bc6f-3e491f81a56f";
     expect(backendBaseline).toBe("7cd52e549c2a657dc66643b36701356d1d024de5");
     expect(Object.keys(merchantContracts).sort()).toEqual([
@@ -563,6 +563,7 @@ describe("permanent executable architecture boundaries", () => {
       "productInventory",
       "productMedia",
       "productOptions",
+      "productPricing",
       "productVariant",
       "productVariants",
       "products",
@@ -574,11 +575,14 @@ describe("permanent executable architecture boundaries", () => {
       "updateProductMedia",
       "updateProductOption",
       "updateProductOptionValue",
+      "updateProductPricing",
       "updateProductVariant",
       "updateVariantInventory",
       "updateVariantMedia",
+      "updateVariantPricing",
       "variantInventory",
       "variantMedia",
+      "variantPricing",
     ]);
     expect([
       [merchantContracts.csrf.method, merchantContracts.csrf.path()],

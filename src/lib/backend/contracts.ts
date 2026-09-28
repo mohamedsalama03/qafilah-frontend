@@ -1,3 +1,12 @@
+import {
+  decodePricing,
+  type Pricing,
+  type ProductPricingReadInput,
+  type VariantPricingReadInput,
+  type UpdateProductPricingInput,
+  type UpdateVariantPricingInput,
+} from "../../features/pricing/contracts";
+import { pricePayloadSchema } from "../../features/pricing/model";
 import { z } from "zod";
 import {
   decodeProductMedia,
@@ -580,6 +589,50 @@ export const merchantContracts = {
     decodeError: (payload: unknown) =>
       validation(payload, ["status", "q", "sort", "per_page", "cursor"]),
   } satisfies EndpointContract<CategoryListInput, CategoryPage>,
+  productPricing: {
+    evidence: {
+      source:
+        "Qafilah backend 4c86b8429f6d3e26d07129494de99f7f5b76db73: Pricing ProductPricingController/FindProductPricingQuery; MerchantContextCurrencyTest",
+    },
+    method: "GET",
+    path: (input: ProductPricingReadInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/pricing`,
+    decode: decodePricing,
+  } satisfies EndpointContract<ProductPricingReadInput, Pricing>,
+  updateProductPricing: {
+    evidence: {
+      source:
+        "Qafilah backend 4c86b8429f6d3e26d07129494de99f7f5b76db73: Pricing ProductPricingController/UpdateProductPriceAction; MerchantContextCurrencyTest",
+    },
+    method: "PATCH",
+    path: (input: UpdateProductPricingInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/pricing`,
+    decode: decodePricing,
+    body: (input: UpdateProductPricingInput) => pricePayloadSchema.parse(input.data),
+    decodeError: (payload: unknown) => validation(payload, ["amount", "currency", "product"]),
+  } satisfies EndpointContract<UpdateProductPricingInput, Pricing>,
+  variantPricing: {
+    evidence: {
+      source:
+        "Qafilah backend 4c86b8429f6d3e26d07129494de99f7f5b76db73: Pricing VariantPricingController/FindVariantPricingQuery; MerchantContextCurrencyTest",
+    },
+    method: "GET",
+    path: (input: VariantPricingReadInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/variants/${catalogUuidSchema.parse(input.variantUuid)}/pricing`,
+    decode: decodePricing,
+  } satisfies EndpointContract<VariantPricingReadInput, Pricing>,
+  updateVariantPricing: {
+    evidence: {
+      source:
+        "Qafilah backend 4c86b8429f6d3e26d07129494de99f7f5b76db73: Pricing VariantPricingController/UpdateVariantPriceAction; MerchantContextCurrencyTest",
+    },
+    method: "PATCH",
+    path: (input: UpdateVariantPricingInput) =>
+      `/api/v1/stores/${catalogUuidSchema.parse(input.storeUuid)}/catalog/products/${catalogUuidSchema.parse(input.productUuid)}/variants/${catalogUuidSchema.parse(input.variantUuid)}/pricing`,
+    decode: decodePricing,
+    body: (input: UpdateVariantPricingInput) => pricePayloadSchema.parse(input.data),
+    decodeError: (payload: unknown) => validation(payload, ["amount", "currency", "product"]),
+  } satisfies EndpointContract<UpdateVariantPricingInput, Pricing>,
   productInventory: {
     evidence: evidence(
       "routes/api.php:414; Inventory ProductInventoryController/FindProductInventoryQuery/ProductInventoryResource; Catalog PreAuthorizeCatalogRoute/ProductPolicy; CatalogCommercialStateApiTest",

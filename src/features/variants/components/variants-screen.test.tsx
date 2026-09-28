@@ -1,3 +1,5 @@
+// Pricing has its own panel/lifecycle and real Laravel suites; these assertions isolate Variant structure.
+vi.mock("@/features/pricing/components/pricing-panel", () => ({ PricingPanel: () => null }));
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MerchantProduct } from "@/features/products/contracts";

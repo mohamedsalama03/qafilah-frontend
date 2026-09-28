@@ -332,7 +332,7 @@ test("real Product detail renders plain text and exact simple and Variant commer
           /\/(pricing|inventory|variants|media)(?:\?|$)/.test(entry.path) &&
           !(
             entry.method === "GET" &&
-            ["inventory", "media"].some(
+            ["inventory", "media", "pricing"].some(
               (resource) =>
                 entry.path ===
                 `/api/v1/stores/${store.id}/catalog/products/${product.id}/${resource}`,

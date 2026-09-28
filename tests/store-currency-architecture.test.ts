@@ -172,7 +172,7 @@ describe("Store currency compatibility architecture", () => {
     expect(violations, JSON.stringify(violations)).toEqual([]);
   });
 
-  it("keeps production persistence and Pricing activation blocked", () => {
+  it("keeps production persistence and unverified Pricing activation blocked", () => {
     const violations = productionAnalysis().architecture.filter(({ rule }) =>
       ["browser-persistence", "central-api-boundary", "verified-contract-registry"].includes(rule),
     );
@@ -394,7 +394,7 @@ describe("Store currency compatibility architecture", () => {
     },
   );
 
-  it.each(["GET", "PATCH"])("blocks Product/Variant %s Pricing activation", (method) => {
+  it.each(["GET", "PATCH"])("blocks unverified Product/Variant %s Pricing activation", (method) => {
     for (const suffix of ["/pricing", "/variants/${input.variantUuid}/pricing"]) {
       const source =
         'export const merchantContracts = { pricing: { method: "' +

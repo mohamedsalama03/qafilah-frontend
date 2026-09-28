@@ -114,6 +114,10 @@ function apiFixture(): MerchantApi {
     createVariantMedia: vi.fn(),
     updateVariantMedia: vi.fn(),
     deleteVariantMedia: vi.fn(),
+    loadProductPricing: vi.fn(async () => ({ price: null })),
+    updateProductPricing: vi.fn(),
+    loadVariantPricing: vi.fn(async () => ({ price: null })),
+    updateVariantPricing: vi.fn(),
     loadVariantInventory: vi.fn(async () => inventory(currentQuantity)),
     updateVariantInventory: vi.fn(async ({ data }) => {
       currentQuantity = data.quantity;

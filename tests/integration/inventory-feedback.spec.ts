@@ -95,7 +95,7 @@ test.afterEach(async ({ page }, info) => {
       .some(
         (entry) =>
           /\/(pricing|media|variants|options)\b/.test(entry.path) &&
-          !(entry.method === "GET" && /\/products\/[^/]+\/media$/.test(entry.path)),
+          !(entry.method === "GET" && /\/products\/[^/]+\/(?:media|pricing)$/.test(entry.path)),
       ),
   ).toBe(false);
   for (const entry of writes(page)) {

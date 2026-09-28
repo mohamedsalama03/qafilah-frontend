@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { FormError } from "@/components/ui/field";
 import { VariantInventoryPanel } from "@/features/variant-inventory/components/variant-inventory-panel";
+import { PricingPanel } from "@/features/pricing/components/pricing-panel";
 import { MediaPanel } from "@/features/media/components/media-panel";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -465,6 +466,12 @@ function VariantDetails({
       {query.error && (
         <CatalogError error={query.error} detail retry={() => void query.refetch()} />
       )}
+      <PricingPanel
+        product={product}
+        variant={variant}
+        productReadPending={blocked || query.isFetching}
+        productReadFailed={contextReadFailed || !!query.error}
+      />
       <VariantInventoryPanel
         key={variant.id}
         product={product}

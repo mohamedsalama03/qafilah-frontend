@@ -85,6 +85,10 @@ async function fixture(principalId = "inventory-principal") {
     createVariantMedia: vi.fn(),
     updateVariantMedia: vi.fn(),
     deleteVariantMedia: vi.fn(),
+    loadProductPricing: vi.fn(async () => ({ price: null })),
+    updateProductPricing: vi.fn(),
+    loadVariantPricing: vi.fn(async () => ({ price: null })),
+    updateVariantPricing: vi.fn(),
     loadVariantInventory: vi.fn(async () => stock(7)),
     updateVariantInventory: vi.fn(async (input) => stock(input.data.quantity)),
   };

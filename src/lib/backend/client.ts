@@ -1,4 +1,10 @@
 import type {
+  ProductPricingReadInput,
+  VariantPricingReadInput,
+  UpdateProductPricingInput,
+  UpdateVariantPricingInput,
+} from "../../features/pricing/contracts";
+import type {
   ProductMediaReadInput,
   VariantMediaReadInput,
   CreateProductMediaInput,
@@ -285,6 +291,28 @@ export function createMerchantApi(options: MerchantApiOptions) {
     },
     deleteVariantMedia(input: DeleteVariantMediaInput, signal?: AbortSignal) {
       return requestMediaDelete(merchantContracts.deleteVariantMedia, input, signal);
+    },
+    loadProductPricing(input: ProductPricingReadInput, signal?: AbortSignal) {
+      return requestStructuralRead(merchantContracts.productPricing, input, signal);
+    },
+    updateProductPricing(input: UpdateProductPricingInput, signal?: AbortSignal) {
+      return requestStructuralMutation(
+        merchantContracts.updateProductPricing,
+        input,
+        (result, request) => result.price?.amount === request.data.amount,
+        signal,
+      );
+    },
+    loadVariantPricing(input: VariantPricingReadInput, signal?: AbortSignal) {
+      return requestStructuralRead(merchantContracts.variantPricing, input, signal);
+    },
+    updateVariantPricing(input: UpdateVariantPricingInput, signal?: AbortSignal) {
+      return requestStructuralMutation(
+        merchantContracts.updateVariantPricing,
+        input,
+        (result, request) => result.price?.amount === request.data.amount,
+        signal,
+      );
     },
     loadVariantInventory(input: VariantInventoryReadInput, signal?: AbortSignal) {
       return requestStructuralRead(merchantContracts.variantInventory, input, signal);
