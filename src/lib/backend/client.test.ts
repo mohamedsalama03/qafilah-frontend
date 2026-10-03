@@ -302,6 +302,38 @@ describe("six verified Merchant contracts", () => {
 });
 
 describe("strict authority decoding", () => {
+  it.each(["Owner", "Delivery operator"])(
+    "accepts the published delivery-address permission for %s without changing grants",
+    async (name) => {
+      const { api, fetcher } = setup();
+      const data = {
+        ...context,
+        role: { ...context.role, name },
+        permissions: ["orders.delivery_address.view", "orders.view", "products.view"],
+      };
+      fetcher.mockResolvedValueOnce(json(envelope(data)));
+      expect(await api.loadStoreContext(storeId)).toEqual(data);
+    },
+  );
+  it.each([
+    "orders.delivery_address.update",
+    "orders.other_address.view",
+    "orders.delivery_address.view.extra",
+    "orders.delivery_address.view\n",
+    " orders.delivery_address.view",
+    "orders.delivery_address.view ",
+    "Orders.delivery_address.view",
+  ])(
+    "rejects unrecognized underscore permissions and malformed variants %j",
+    async (permission) => {
+      const { api, fetcher } = setup();
+      fetcher.mockResolvedValueOnce(json(envelope({ ...context, permissions: [permission] })));
+      await expect(api.loadStoreContext(storeId)).rejects.toMatchObject({
+        kind: "invalid-response",
+        requestId,
+      });
+    },
+  );
   it.each([
     { ...user, status: "suspended" },
     { ...user, id: "123" },
@@ -318,6 +350,8 @@ describe("strict authority decoding", () => {
   });
   it.each([
     { ...context, permissions: ["*"] },
+    { ...context, permissions: ["orders.delivery_address.view", "orders.delivery_address.view"] },
+    { ...context, permissions: ["orders.view", "orders.delivery_address.view"] },
     { ...context, permissions: ["orders.view", "orders.view"] },
     { ...context, permissions: ["products.view", "orders.view"] },
     { ...context, role: { ...context.role, admin: true } },

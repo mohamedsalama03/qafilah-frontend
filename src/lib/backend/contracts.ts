@@ -160,11 +160,13 @@ const storePage = z
     );
   });
 
+// The built-in catalog includes this exact slug outside PermissionSlug's generic pattern.
 const permission = z
   .string()
   .min(3)
   .max(120)
-  .regex(/^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$/);
+  .regex(/^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$/)
+  .or(z.literal("orders.delivery_address.view"));
 const storeContext = z.strictObject({
   store: selectedContextStore,
   membership: z.strictObject({ id: uuid, status: z.literal("active") }),
